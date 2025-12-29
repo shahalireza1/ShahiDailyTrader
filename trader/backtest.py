@@ -25,9 +25,8 @@ def _calculate_metrics(equity_curve: pd.Series, trades: pd.DataFrame, starting_c
         }
 
     daily_returns = equity_curve.pct_change().dropna()
-    total_days = (equity_curve.index[-1] - equity_curve.index[0]).days
-    annual_factor = 365 / total_days if total_days else 0
-    cagr = (equity_curve.iloc[-1] / starting_cash) ** annual_factor - 1 if annual_factor else 0.0
+    trading_years = len(daily_returns) / 252 if len(daily_returns) else 0
+    cagr = (equity_curve.iloc[-1] / starting_cash) ** (1 / trading_years) - 1 if trading_years else 0.0
 
     sharpe = 0.0
     if not daily_returns.empty and daily_returns.std() > 0:

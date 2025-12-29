@@ -23,30 +23,46 @@ A lightweight daily-bar backtester with a built-in SMA crossover strategy, real 
 
 ## Usage
 
-Run the backtester end-to-end with a single command. Example:
+Run the backtester end-to-end with a single command. Example (default SMA + RSI filter strategy):
 
 ```bash
-python -m trader backtest --symbol SPY --start 2018-01-01 --end 2025-01-01 --strategy sma_cross --fast 20 --slow 50 --starting-cash 100000 --position-fraction 1.0 --fee-bps 1.0 --slippage-bps 1.0
+python -m trader backtest \
+  --symbol SPY \
+  --start 2018-01-01 \
+  --end 2025-01-01 \
+  --strategy sma_rsi \
+  --fast 20 \
+  --slow 50 \
+  --rsi-period 14 \
+  --rsi-threshold 50 \
+  --cash 100000 \
+  --position-fraction 1.0 \
+  --fee-bps 1.0 \
+  --slippage-bps 1.0 \
+  --plot
 ```
 
 ### What it does
 - Downloads daily OHLCV data through **yfinance** (using adjusted close when available).
 - Caches downloads to `./data_cache/` as CSV to avoid re-fetching.
-- Applies the SMA crossover strategy (configurable `--fast` and `--slow`).
+- Applies a SMA crossover strategy with an RSI confirmation filter (configurable windows/thresholds).
 - Runs a long-only daily backtest with position sizing, fees (bps), and slippage (bps).
 - Saves outputs under `./outputs/<timestamp>/`:
   - `signals_and_prices.csv` (data + signals)
   - `equity_curve.csv` (portfolio value over time)
   - `trades.csv` (entry/exit log)
   - `metrics.json` (CAGR, Sharpe, max drawdown, win rate, number of trades)
-  - `price_signals.png` (price plus SMA and buy/sell markers)
-  - `equity_curve.png` (equity curve)
+  - `summary.png` (price, SMAs/RSI, buy/sell markers, and equity curve)
 
 ### Quick smoke test
 To validate everything without a long download, run a short window:
 ```bash
-python -m trader backtest --symbol SPY --start 2023-01-01 --end 2024-01-01 --strategy sma_cross --fast 10 --slow 30
+python -m trader backtest --symbol SPY --start 2023-01-01 --end 2024-01-01 --strategy sma_rsi --fast 10 --slow 30 --rsi-threshold 55
 ```
+
+### Interpreting results
+- **metrics.json** includes CAGR, Sharpe ratio, maximum drawdown, win rate, and total trades.
+- **summary.png** overlays the price, SMA signals, RSI filter, and equity curve to quickly spot how entries/exits behaved.
 
 ## Troubleshooting
 - If you see a data error, double-check the symbol and date range.
