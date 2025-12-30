@@ -1,0 +1,37 @@
+symbols:
+  - SPY
+  - QQQ
+start: "2022-01-01"
+end: "2023-12-31"
+mode: backtest
+fees_bps: 1.0
+slippage_bps: 1.0
+starting_cash: 100000
+strategies:
+  - name: sma_cross
+    parameters:
+      fast: 20
+      slow: 50
+  - name: mean_reversion
+    parameters:
+      lookback: 10
+      entry_z: -1.0
+      exit_z: 0.0
+ensemble:
+  mode: equal_weight
+risk:
+  max_drawdown: 0.25
+  max_drawdown_stop: 0.2
+  max_gross_exposure: 0.35
+  max_position_per_symbol: 0.01
+  vol_target_annual: 0.12
+  vol_lookback: 20
+  trade_cooldown_days: 1
+  position_mode: fixed_fraction
+  position_fraction: 0.8
+  kelly_safety: 0.5
+walkforward:
+  train_window: 252
+  test_window: 90
+  step: 90
+output_dir: outputs

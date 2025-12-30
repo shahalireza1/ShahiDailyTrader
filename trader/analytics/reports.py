@@ -51,12 +51,19 @@ def build_html_report(
     equity_vs_benchmark: Path,
     drawdown_plot: Path,
     heatmap_plot: Path,
+    strategy_attribution: pd.DataFrame | None = None,
 ) -> Path:
     metrics_df = pd.DataFrame(metrics, index=["value"]).T
     metrics_html = metrics_df.to_html(float_format=lambda x: f"{x:.4f}")
 
     monthly_pct = monthly_returns.copy() * 100
     monthly_html = monthly_pct.to_html(float_format=lambda x: f"{x:.2f}%")
+
+    attribution_html = ""
+    if strategy_attribution is not None and not strategy_attribution.empty:
+        attribution_html = "<h2>Strategy Attribution</h2>" + strategy_attribution.to_html(
+            float_format=lambda x: f"{x:.4f}"
+        )
 
     html = f"""
     <html>
@@ -83,6 +90,7 @@ def build_html_report(
         <h2>Monthly Returns</h2>
         <img src="data:image/png;base64,{_encode_img(heatmap_plot)}" alt="Monthly Returns Heatmap" />
         {monthly_html}
+        {attribution_html}
       </body>
     </html>
     """

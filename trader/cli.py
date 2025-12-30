@@ -63,6 +63,7 @@ def run_cli(args: argparse.Namespace) -> None:
             plots_dir / "equity_vs_benchmark.png",
             plots_dir / "drawdown.png",
             plots_dir / "monthly_heatmap.png",
+            result.strategy_attribution,
         )
         print("\nReport ready!")
         print(f"Outputs saved to: {result.output_dir.resolve()}")
@@ -89,6 +90,7 @@ def run_cli(args: argparse.Namespace) -> None:
             plots_dir / "equity_vs_benchmark.png",
             plots_dir / "drawdown.png",
             plots_dir / "monthly_heatmap.png",
+            result.strategy_attribution,
         )
         print(f"Report: {report_path.resolve()}")
 

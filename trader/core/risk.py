@@ -16,8 +16,10 @@ class PositionSizingConfig:
     vol_lookback: int = 20
 
 
-def apply_drawdown_stop(equity_curve: pd.Series, max_drawdown: float) -> pd.Series:
-    if equity_curve.empty or max_drawdown <= 0:
+def apply_drawdown_stop(
+    equity_curve: pd.Series, max_drawdown: float, safe_fraction: float = 0.0
+) -> pd.Series:
+    if equity_curve.empty or max_drawdown is None or max_drawdown <= 0:
         return pd.Series(1.0, index=equity_curve.index)
     running_max = equity_curve.cummax()
     drawdown = (equity_curve - running_max) / running_max
@@ -25,6 +27,8 @@ def apply_drawdown_stop(equity_curve: pd.Series, max_drawdown: float) -> pd.Seri
     active = (~halted).astype(float)
     # once halted, stay halted
     active = active.cummin()
+    if safe_fraction > 0:
+        return active + (1 - active) * safe_fraction
     return active
 
 

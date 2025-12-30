@@ -55,6 +55,9 @@ walkforward:
 output_dir: outputs
 ```
 
+### Ensemble / Mixture configurations
+See `configs/ensemble_equal_weight.yaml`, `configs/ensemble_vote.yaml`, and `configs/ensemble_risk_budget.yaml` for concrete templates. Each file shows how to declare multiple strategies under `strategies:` and control the ensemble behaviour via the `ensemble:` block (modes: `equal_weight`, `fixed_weights`, `voting`, `risk_budget`).
+
 ## CLI
 
 List all registered strategies:
@@ -65,6 +68,9 @@ python -m trader.backtest --list-strategies
 Run a backtest from config:
 ```bash
 python -m trader.cli --config config.yaml --run backtest
+# Ensemble examples
+python -m trader.cli --config configs/ensemble_equal_weight.yaml --run backtest
+python -m trader.cli --config configs/ensemble_vote.yaml --run backtest
 ```
 
 Run a backtest and emit plots:
@@ -83,6 +89,8 @@ Generate an HTML performance report (creates `outputs/<run_id>/report.html` and 
 python -m trader.cli --config configs/example.yaml --run report
 # or
 python -m trader.cli report --config configs/example.yaml
+# With ensembles
+python -m trader.cli report --config configs/ensemble_risk_budget.yaml
 ```
 
 ## Included Strategies
@@ -93,9 +101,10 @@ python -m trader.cli report --config configs/example.yaml
 - **breakout**: Donchian-style high/low breakout
 
 ## Risk & Portfolio Features
-- Volatility targeting, Kelly-lite or fixed position sizing
-- Max drawdown stop overlay
-- Portfolio-level aggregation across multiple symbols
+- Volatility targeting (per-symbol) and annualized portfolio target knob
+- Kelly-lite or fixed position sizing with configurable trade cooldowns
+- Max drawdown stop overlay with optional safe exposure fraction
+- Portfolio-level aggregation across multiple symbols with gross exposure and per-symbol limits
 
 ## Outputs (saved under `outputs/<timestamp>/`)
 - `equity_curve.csv`, `trades.csv`, and `metrics.json` (CAGR, total return, Sharpe, max drawdown, win rate)
