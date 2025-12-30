@@ -26,19 +26,28 @@ class DataLoader:
         safe_end = request.end.replace("-", "")
         return self.cache_dir / f"{safe_symbol}_{safe_start}_{safe_end}.csv"
 
-    def fetch(self, request: DataRequest) -> pd.DataFrame:
-        cache_file = self._cache_path(request)
-        if cache_file.exists():
-            df = pd.read_csv(cache_file, index_col=0, parse_dates=True)
+    def _flatten_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        if not isinstance(df.columns, pd.MultiIndex):
+            return df
+
+        price_fields = {"Open", "High", "Low", "Close", "Adj Close", "Volume"}
+        candidate_levels = []
+        for level in range(df.columns.nlevels):
+            level_values = set(df.columns.get_level_values(level))
+            matches = price_fields & level_values
+            if matches:
+                candidate_levels.append((level, len(matches)))
+
+        if candidate_levels:
+            price_level = sorted(candidate_levels, key=lambda item: (-item[1], item[0]))[0][0]
+            df.columns = df.columns.get_level_values(price_level)
         else:
-            df = yf.download(request.symbol, start=request.start, end=request.end, progress=False, auto_adjust=False)
-            if df.empty:
-                raise RuntimeError(
-                    f"No data downloaded for {request.symbol} between {request.start} and {request.end}."
-                )
-            df.index = pd.to_datetime(df.index)
-            df.sort_index(inplace=True)
-            df.to_csv(cache_file)
+            df.columns = df.columns.get_level_values(-1)
+
+        return df
+
+    def _normalize(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = self._flatten_columns(df.copy())
 
         if "Adj Close" in df.columns:
             df["Close"] = df["Adj Close"]
@@ -50,6 +59,28 @@ class DataLoader:
 
         cleaned = df[required_cols].dropna(subset=["Close"])
         return cleaned
+
+    def fetch(self, request: DataRequest) -> pd.DataFrame:
+        cache_file = self._cache_path(request)
+        from_cache = cache_file.exists()
+
+        if from_cache:
+            df = pd.read_csv(cache_file, index_col=0, parse_dates=True)
+        else:
+            df = yf.download(request.symbol, start=request.start, end=request.end, progress=False, auto_adjust=False)
+            if df.empty:
+                raise RuntimeError(
+                    f"No data downloaded for {request.symbol} between {request.start} and {request.end}."
+                )
+            df.index = pd.to_datetime(df.index)
+            df.sort_index(inplace=True)
+
+        normalized = self._normalize(df)
+
+        if not from_cache:
+            normalized.to_csv(cache_file)
+
+        return normalized
 
     def fetch_many(self, requests: Iterable[DataRequest]) -> Dict[str, pd.DataFrame]:
         results: Dict[str, pd.DataFrame] = {}
