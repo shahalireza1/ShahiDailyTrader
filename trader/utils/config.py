@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -66,6 +66,21 @@ def _merge_dict(default: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, 
     return merged
 
 
+def _to_dict(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if is_dataclass(value):
+        return asdict(value)
+    if hasattr(value, "dict") and callable(getattr(value, "dict")):
+        try:
+            return dict(value.dict())
+        except Exception:
+            pass
+    if hasattr(value, "__dict__"):
+        return dict(vars(value))
+    return {}
+
+
 def load_config(path: Path) -> Config:
     if yaml is None:
         raise ImportError("PyYAML is required to load configuration files. Please install PyYAML.")
@@ -79,11 +94,11 @@ def load_config(path: Path) -> Config:
     cfg = Config()
     raw = _merge_dict(cfg.__dict__, data)
 
-    strategy_data = raw.get("strategy", {}) or {}
-    strategies_data = raw.get("strategies") or []
-    risk_data = raw.get("risk", {}) or {}
-    walk_data = raw.get("walkforward", {}) or {}
-    ensemble_data = raw.get("ensemble", {}) or {}
+    strategy_data = _to_dict(raw.get("strategy", {}) or {})
+    strategies_data_raw = raw.get("strategies") or []
+    risk_data = _to_dict(raw.get("risk", {}) or {})
+    walk_data = _to_dict(raw.get("walkforward", {}) or {})
+    ensemble_data = _to_dict(raw.get("ensemble", {}) or {})
 
     cfg.symbols = list(raw.get("symbols", []))
     cfg.start = raw.get("start", cfg.start)
@@ -98,11 +113,14 @@ def load_config(path: Path) -> Config:
         name=str(strategy_data.get("name", cfg.strategy.name)),
         parameters=dict(strategy_data.get("parameters", cfg.strategy.parameters)),
     )
-    cfg.strategies = [
-        StrategyConfig(name=str(item.get("name", cfg.strategy.name)), parameters=dict(item.get("parameters", {})))
-        for item in strategies_data
-        if item is not None
-    ]
+    cfg.strategies = []
+    for item in strategies_data_raw:
+        mapping = _to_dict(item)
+        if not mapping:
+            continue
+        cfg.strategies.append(
+            StrategyConfig(name=str(mapping.get("name", cfg.strategy.name)), parameters=dict(mapping.get("parameters", {})))
+        )
     if not cfg.strategies:
         cfg.strategies = [cfg.strategy]
 
