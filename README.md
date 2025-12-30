@@ -1,70 +1,102 @@
 # Shahi Daily Trader
 
-A lightweight daily-bar backtester with a built-in SMA crossover strategy, real historical data (via yfinance), cached downloads, and PNG visualizations.
+A modular quantitative research platform that backtests portfolios across pluggable strategies, risk overlays, and analytics with YAML-driven configuration.
+
+## Architecture
+
+```
+trader/
+  core/        engine, portfolio accounting, execution placeholders, risk
+  data/        loaders, cache helpers, external providers (sentiment/ML hooks)
+  strategies/  base class + registry + packaged strategies (SMA/RSI, momentum, breakout, mean reversion)
+  analytics/   metrics, plotting, reporting
+  signals/     indicator utilities (SMA, RSI, z-score)
+  utils/       configuration loader
+```
 
 ## Installation
 
-1. Ensure Python 3.9+ is installed.
-2. (Recommended) Create and activate a virtual environment:
-   - **Windows (PowerShell):**
-     ```powershell
-     python -m venv .venv
-     .venv\Scripts\Activate.ps1
-     ```
-   - **macOS / Linux:**
-     ```bash
-     python -m venv .venv
-     source .venv/bin/activate
-     ```
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-## Usage
-
-Run the backtester end-to-end with a single command. Example (default SMA + RSI filter strategy):
-
 ```bash
-python -m trader backtest \
-  --symbol SPY \
-  --start 2018-01-01 \
-  --end 2025-01-01 \
-  --strategy sma_rsi \
-  --fast 20 \
-  --slow 50 \
-  --rsi-period 14 \
-  --rsi-threshold 50 \
-  --cash 100000 \
-  --position-fraction 1.0 \
-  --fee-bps 1.0 \
-  --slippage-bps 1.0 \
-  --plot
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-### What it does
-- Downloads daily OHLCV data through **yfinance** (using adjusted close when available).
-- Caches downloads to `./data_cache/` as CSV to avoid re-fetching.
-- Applies a SMA crossover strategy with an RSI confirmation filter (configurable windows/thresholds).
-- Runs a long-only daily backtest with position sizing, fees (bps), and slippage (bps).
-- Saves outputs under `./outputs/<timestamp>/`:
-  - `signals_and_prices.csv` (data + signals)
-  - `equity_curve.csv` (portfolio value over time)
-  - `trades.csv` (entry/exit log)
-  - `metrics.json` (CAGR, Sharpe, max drawdown, win rate, number of trades)
-  - `summary.png` (price, SMAs/RSI, buy/sell markers, and equity curve)
+## Configuration (config.yaml)
 
-### Quick smoke test
-To validate everything without a long download, run a short window:
-```bash
-python -m trader backtest --symbol SPY --start 2023-01-01 --end 2024-01-01 --strategy sma_rsi --fast 10 --slow 30 --rsi-threshold 55
+```yaml
+symbols:
+  - SPY
+  - QQQ
+start: "2022-01-01"
+end: "2023-12-31"
+mode: backtest
+fees_bps: 1.0
+slippage_bps: 1.0
+starting_cash: 100000
+strategy:
+  name: sma_rsi
+  parameters:
+    fast: 20
+    slow: 50
+    rsi_period: 14
+    rsi_threshold: 55
+risk:
+  max_drawdown: 0.25
+  target_volatility: 0.15
+  vol_lookback: 20
+  position_mode: fixed_fraction
+  position_fraction: 0.8
+  kelly_safety: 0.5
+walkforward:
+  train_window: 252
+  test_window: 90
+  step: 90
+output_dir: outputs
 ```
 
-### Interpreting results
-- **metrics.json** includes CAGR, Sharpe ratio, maximum drawdown, win rate, and total trades.
-- **summary.png** overlays the price, SMA signals, RSI filter, and equity curve to quickly spot how entries/exits behaved.
+## CLI
 
-## Troubleshooting
-- If you see a data error, double-check the symbol and date range.
-- Delete files under `data_cache/` to force a fresh download if cached data looks stale.
-- Use `--position-fraction` between 0 and 1 to control allocation; values outside the range are clipped.
+List all registered strategies:
+```bash
+python -m trader.backtest --list-strategies
+```
+
+Run a backtest from config:
+```bash
+python -m trader.backtest --config config.yaml
+```
+
+Run walk-forward or paper modes:
+```bash
+python -m trader.backtest --config config.yaml --run walkforward
+python -m trader.backtest --config config.yaml --run paper
+```
+
+## Included Strategies
+- **sma_cross**: traditional fast/slow crossover
+- **sma_rsi**: crossover with RSI momentum filter
+- **mean_reversion**: z-score reversion entry/exit
+- **momentum**: lookback return breakout
+- **breakout**: Donchian-style high/low breakout
+
+## Risk & Portfolio Features
+- Volatility targeting, Kelly-lite or fixed position sizing
+- Max drawdown stop overlay
+- Portfolio-level aggregation across multiple symbols
+
+## Outputs (saved under `outputs/<timestamp>/`)
+- `equity_curve.csv` and PNG plots (equity, per-symbol cumulative returns, price with signals)
+- `trades.csv` trade log
+- `metrics.json` with CAGR, Sharpe, Sortino, max drawdown, hit rate, expectancy
+- Per-symbol signal/price CSVs
+
+## Extensibility Hooks
+- `core/execution.py`: broker adapters (paper + live placeholder)
+- `data/providers.py`: sentiment/news + ML signal stubs ready for integration
+
+## Tests
+
+```bash
+pytest
+```

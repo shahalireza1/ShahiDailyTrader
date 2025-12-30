@@ -1,0 +1,28 @@
+symbols:
+  - SPY
+  - QQQ
+start: "2022-01-01"
+end: "2023-12-31"
+mode: "backtest"
+fees_bps: 1.0
+slippage_bps: 1.0
+starting_cash: 100000
+strategy:
+  name: sma_rsi
+  parameters:
+    fast: 20
+    slow: 50
+    rsi_period: 14
+    rsi_threshold: 55
+risk:
+  max_drawdown: 0.25
+  target_volatility: 0.15
+  vol_lookback: 20
+  position_mode: fixed_fraction
+  position_fraction: 0.8
+  kelly_safety: 0.5
+walkforward:
+  train_window: 252
+  test_window: 90
+  step: 90
+output_dir: outputs

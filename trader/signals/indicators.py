@@ -1,0 +1,31 @@
+from __future__ import annotations
+
+import pandas as pd
+
+
+def sma(series: pd.Series, window: int) -> pd.Series:
+    if window <= 0:
+        raise ValueError("SMA window must be positive")
+    return series.rolling(window, min_periods=window).mean()
+
+
+def rsi(series: pd.Series, period: int = 14) -> pd.Series:
+    if period <= 0:
+        raise ValueError("RSI period must be positive")
+    delta = series.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, pd.NA)
+    result = 100 - (100 / (1 + rs))
+    return result.fillna(0)
+
+
+def zscore(series: pd.Series, window: int = 20) -> pd.Series:
+    mean = series.rolling(window, min_periods=window).mean()
+    std = series.rolling(window, min_periods=window).std()
+    return (series - mean) / std.replace(0, pd.NA)
+
+
+__all__ = ["sma", "rsi", "zscore"]
