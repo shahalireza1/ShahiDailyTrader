@@ -25,6 +25,39 @@ def plot_equity(equity_curve: pd.Series, output_dir: Path) -> Path:
     return path
 
 
+def plot_equity_with_drawdown(
+    equity_curve: pd.Series, benchmark_curve: pd.Series, output_dir: Path
+) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    rolling_max = equity_curve.cummax()
+    drawdown = (equity_curve - rolling_max) / rolling_max
+
+    fig, (ax_top, ax_bottom) = plt.subplots(2, 1, figsize=(10, 6), sharex=True, height_ratios=[3, 1.4])
+    ax_top.plot(equity_curve.index, equity_curve.values, color="teal", label="Strategy")
+    ax_top.plot(
+        benchmark_curve.index,
+        benchmark_curve.values,
+        color="gray",
+        linestyle="--",
+        label="Buy & Hold",
+    )
+    ax_top.set_title("Equity Curve vs. Buy & Hold")
+    ax_top.set_ylabel("Portfolio Value")
+    ax_top.legend()
+
+    ax_bottom.fill_between(drawdown.index, drawdown.values, color="salmon")
+    ax_bottom.set_title("Drawdown")
+    ax_bottom.set_ylabel("Drawdown")
+    ax_bottom.set_xlabel("Date")
+    ax_bottom.set_ylim(drawdown.min() * 1.05 if not drawdown.empty else -0.1, 0)
+
+    fig.tight_layout()
+    path = output_dir / "equity_and_drawdown.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    return path
+
+
 def plot_equity_vs_benchmark(
     equity_curve: pd.Series, benchmark_curve: pd.Series, output_dir: Path
 ) -> Path:

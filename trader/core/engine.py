@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
 import pandas as pd
 
@@ -12,6 +12,7 @@ from trader.analytics.plots import (
     plot_drawdown,
     plot_equity,
     plot_equity_vs_benchmark,
+    plot_equity_with_drawdown,
     plot_monthly_returns_heatmap,
     plot_price_with_signals,
     plot_symbol_returns,
@@ -33,12 +34,14 @@ class EngineResult:
     benchmark_curve: pd.Series
     monthly_returns: pd.DataFrame
     output_dir: Path
+    plots_dir: Optional[Path] = None
 
 
 class BacktestEngine:
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, enable_plots: bool = False) -> None:
         self.config = config
         self.loader = DataLoader()
+        self.enable_plots = enable_plots
 
     def _instantiate_strategy(self) -> Strategy:
         return registry.create(self.config.strategy.name, **self.config.strategy.parameters)
@@ -91,13 +94,17 @@ class BacktestEngine:
             output_dir,
             metrics,
         )
-        plot_equity(portfolio_result.equity_curve, output_dir)
-        plot_equity_vs_benchmark(portfolio_result.equity_curve, benchmark_curve, output_dir)
-        plot_drawdown(portfolio_result.equity_curve, output_dir)
-        plot_monthly_returns_heatmap(monthly_returns * 100, output_dir)
-        plot_symbol_returns(portfolio_result.per_symbol, output_dir)
-        for symbol, frame in per_symbol_results.items():
-            plot_price_with_signals(frame, output_dir, symbol)
+        plots_dir = None
+        if self.enable_plots:
+            plots_dir = output_dir / "plots"
+            plot_equity(portfolio_result.equity_curve, plots_dir)
+            plot_equity_vs_benchmark(portfolio_result.equity_curve, benchmark_curve, plots_dir)
+            plot_equity_with_drawdown(portfolio_result.equity_curve, benchmark_curve, plots_dir)
+            plot_drawdown(portfolio_result.equity_curve, plots_dir)
+            plot_monthly_returns_heatmap(monthly_returns * 100, plots_dir)
+            plot_symbol_returns(portfolio_result.per_symbol, plots_dir)
+            for symbol, frame in per_symbol_results.items():
+                plot_price_with_signals(frame, plots_dir, symbol)
 
         return EngineResult(
             equity_curve=portfolio_result.equity_curve,
@@ -107,6 +114,7 @@ class BacktestEngine:
             benchmark_curve=benchmark_curve,
             monthly_returns=monthly_returns,
             output_dir=output_dir,
+            plots_dir=plots_dir,
         )
 
     def _run_walkforward(self) -> EngineResult:
@@ -172,13 +180,17 @@ class BacktestEngine:
             output_dir,
             metrics,
         )
-        plot_equity(portfolio_result.equity_curve, output_dir)
-        plot_equity_vs_benchmark(portfolio_result.equity_curve, benchmark_curve, output_dir)
-        plot_drawdown(portfolio_result.equity_curve, output_dir)
-        plot_monthly_returns_heatmap(monthly_returns * 100, output_dir)
-        plot_symbol_returns(portfolio_result.per_symbol, output_dir)
-        for symbol, frame in per_symbol_results.items():
-            plot_price_with_signals(frame, output_dir, symbol)
+        plots_dir = None
+        if self.enable_plots:
+            plots_dir = output_dir / "plots"
+            plot_equity(portfolio_result.equity_curve, plots_dir)
+            plot_equity_vs_benchmark(portfolio_result.equity_curve, benchmark_curve, plots_dir)
+            plot_equity_with_drawdown(portfolio_result.equity_curve, benchmark_curve, plots_dir)
+            plot_drawdown(portfolio_result.equity_curve, plots_dir)
+            plot_monthly_returns_heatmap(monthly_returns * 100, plots_dir)
+            plot_symbol_returns(portfolio_result.per_symbol, plots_dir)
+            for symbol, frame in per_symbol_results.items():
+                plot_price_with_signals(frame, plots_dir, symbol)
 
         return EngineResult(
             equity_curve=portfolio_result.equity_curve,
@@ -188,6 +200,7 @@ class BacktestEngine:
             benchmark_curve=benchmark_curve,
             monthly_returns=monthly_returns,
             output_dir=output_dir,
+            plots_dir=plots_dir,
         )
 
     def _build_benchmark(self, per_symbol_results: Dict[str, pd.DataFrame]) -> pd.Series:
