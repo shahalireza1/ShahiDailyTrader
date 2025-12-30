@@ -126,6 +126,67 @@ def plot_symbol_returns(per_symbol: Dict[str, pd.Series], output_dir: Path) -> P
     return path
 
 
+def plot_exposure(gross_exposure: pd.Series, output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(10, 3.5))
+    ax.plot(gross_exposure.index, gross_exposure.values, color="purple", label="Gross Exposure")
+    ax.axhline(gross_exposure.mean(), color="gray", linestyle="--", label="Average")
+    ax.set_title("Exposure Over Time")
+    ax.set_ylabel("Gross Exposure")
+    ax.legend()
+    fig.tight_layout()
+    path = output_dir / "exposure.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    return path
+
+
+def plot_rolling_sharpe(rolling_sharpe: pd.Series, output_dir: Path, window_label: str = "6M") -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(10, 3.5))
+    ax.plot(rolling_sharpe.index, rolling_sharpe.values, color="navy")
+    ax.axhline(0, color="black", linewidth=0.8)
+    ax.set_title(f"Rolling {window_label} Sharpe")
+    ax.set_ylabel("Sharpe")
+    fig.tight_layout()
+    path = output_dir / "rolling_sharpe.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    return path
+
+
+def plot_strategy_contribution(attribution: pd.DataFrame, output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(8, 4))
+    if attribution.empty:
+        ax.text(0.5, 0.5, "No attribution data", ha="center", va="center")
+    else:
+        attribution["overlap"].plot(kind="bar", ax=ax, color="teal")
+        ax.set_ylabel("Average Overlap")
+    ax.set_title("Strategy Contribution (Overlap)")
+    fig.tight_layout()
+    path = output_dir / "strategy_contribution.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    return path
+
+
+def plot_spy_comparison(equity_curve: pd.Series, spy_curve: pd.Series, output_dir: Path) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(equity_curve.index, equity_curve.values, label="Strategy", color="teal")
+    if not spy_curve.empty:
+        ax.plot(spy_curve.index, spy_curve.values, label="SPY Buy & Hold", color="orange")
+    ax.set_title("Strategy vs SPY Buy & Hold")
+    ax.set_ylabel("Portfolio Value")
+    ax.legend()
+    fig.tight_layout()
+    path = output_dir / "spy_comparison.png"
+    fig.savefig(path, dpi=150)
+    plt.close(fig)
+    return path
+
+
 def plot_monthly_returns_heatmap(monthly_pivot: pd.DataFrame, output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     working = monthly_pivot.copy()

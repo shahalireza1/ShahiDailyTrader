@@ -21,14 +21,15 @@ ensemble:
   mode: equal_weight
 risk:
   max_drawdown: 0.25
-  max_drawdown_stop: 0.2
-  max_gross_exposure: 0.35
-  max_position_per_symbol: 0.01
-  vol_target_annual: 0.12
-  vol_lookback: 20
+  max_drawdown_stop: 0.15
+  drawdown_safe_fraction: 0.35
+  max_gross_exposure: 0.6
+  max_position_per_symbol: 0.25
+  vol_target_annual: 0.14
+  vol_lookback: 30
   trade_cooldown_days: 1
   position_mode: fixed_fraction
-  position_fraction: 0.8
+  position_fraction: 0.9
   kelly_safety: 0.5
 walkforward:
   train_window: 252

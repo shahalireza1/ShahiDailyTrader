@@ -53,6 +53,10 @@ def test_ensemble_respects_exposure_and_builds_report(tmp_path):
         result.output_dir / "plots" / "drawdown.png",
         result.output_dir / "plots" / "monthly_heatmap.png",
         result.strategy_attribution,
+        exposure_plot=result.output_dir / "plots" / "exposure.png",
+        rolling_sharpe_plot=result.output_dir / "plots" / "rolling_sharpe.png",
+        strategy_contribution_plot=result.output_dir / "plots" / "strategy_contribution.png",
+        spy_comparison_plot=result.output_dir / "plots" / "spy_comparison.png",
     )
 
     assert report.exists()

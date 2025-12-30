@@ -1,0 +1,40 @@
+symbols:
+  - SPY
+  - QQQ
+start: "2018-01-01"
+end: "2024-01-01"
+mode: backtest
+fees_bps: 1.0
+slippage_bps: 1.0
+starting_cash: 150000
+strategies:
+  - name: sma_cross
+    parameters:
+      fast: 50
+      slow: 150
+  - name: sma_rsi
+    parameters:
+      fast: 30
+      slow: 100
+      rsi_period: 14
+      rsi_threshold: 45
+  - name: buy_hold
+    parameters: {}
+ensemble:
+  mode: fixed_weight
+  weights:
+    sma_cross: 0.45
+    sma_rsi: 0.35
+    buy_hold: 0.2
+risk:
+  max_drawdown: 0.22
+  max_drawdown_stop: 0.15
+  drawdown_safe_fraction: 0.35
+  max_gross_exposure: 0.6
+  max_position_per_symbol: 0.25
+  vol_target_annual: 0.14
+  vol_lookback: 40
+  trade_cooldown_days: 1
+  position_mode: fixed_fraction
+  position_fraction: 0.95
+output_dir: outputs

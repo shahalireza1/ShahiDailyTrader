@@ -19,17 +19,17 @@ class StrategyConfig:
 @dataclass
 class RiskConfig:
     max_drawdown: float = 0.2
-    max_drawdown_stop: Optional[float] = None
-    drawdown_safe_fraction: float = 0.0
-    max_gross_exposure: float = 0.35
-    max_position_per_symbol: float = 0.01
+    max_drawdown_stop: Optional[float] = 0.15
+    drawdown_safe_fraction: float = 0.3
+    max_gross_exposure: float = 0.6
+    max_position_per_symbol: float = 0.25
     vol_target_annual: Optional[float] = None
     target_volatility: Optional[float] = None
     vol_lookback: int = 20
     position_mode: str = "fixed_fraction"
     position_fraction: float = 1.0
     kelly_safety: float = 0.5
-    trade_cooldown_days: int = 0
+    trade_cooldown_days: int = 1
 
 
 @dataclass

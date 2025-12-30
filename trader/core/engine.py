@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
+import numpy as np
 import pandas as pd
 
 from trader.analytics.metrics import compute_metrics
@@ -13,9 +14,13 @@ from trader.analytics.plots import (
     plot_equity,
     plot_equity_vs_benchmark,
     plot_equity_with_drawdown,
+    plot_exposure,
     plot_monthly_returns_heatmap,
     plot_price_with_signals,
+    plot_rolling_sharpe,
+    plot_spy_comparison,
     plot_symbol_returns,
+    plot_strategy_contribution,
 )
 from trader.analytics.reports import write_reports
 from trader.core.portfolio import Portfolio
@@ -36,6 +41,10 @@ class EngineResult:
     output_dir: Path
     plots_dir: Optional[Path] = None
     strategy_attribution: Optional[pd.DataFrame] = None
+    gross_exposure: Optional[pd.Series] = None
+    portfolio_returns: Optional[pd.Series] = None
+    spy_benchmark: Optional[pd.Series] = None
+    rolling_sharpe: Optional[pd.Series] = None
 
 
 class BacktestEngine:
@@ -90,11 +99,13 @@ class BacktestEngine:
             per_symbol_results[symbol] = portfolio.backtest_symbol(signals, weight)
 
         portfolio_result = portfolio.combine(per_symbol_results)
-        positions_df = pd.DataFrame({sym: df["position"] for sym, df in per_symbol_results.items()})
-        gross_exposure = positions_df.abs().sum(axis=1).mean() if not positions_df.empty else 0.0
+        positions_df = portfolio_result.positions
+        gross_exposure = portfolio_result.gross_exposure.mean() if not positions_df.empty else 0.0
         turnover = positions_df.diff().abs().sum(axis=1).mean() if not positions_df.empty else 0.0
 
         benchmark_curve = self._build_benchmark(per_symbol_results)
+        spy_benchmark = self._spy_buy_and_hold(per_symbol_results)
+        rolling_sharpe = self._rolling_sharpe(portfolio_result.portfolio_returns)
         metrics = compute_metrics(
             portfolio_result.equity_curve,
             portfolio_result.trades,
@@ -126,6 +137,14 @@ class BacktestEngine:
             plot_drawdown(portfolio_result.equity_curve, plots_dir)
             plot_monthly_returns_heatmap(monthly_returns * 100, plots_dir)
             plot_symbol_returns(portfolio_result.per_symbol, plots_dir)
+            if portfolio_result.gross_exposure is not None:
+                plot_exposure(portfolio_result.gross_exposure, plots_dir)
+            if rolling_sharpe is not None:
+                plot_rolling_sharpe(rolling_sharpe, plots_dir)
+            if attribution is not None:
+                plot_strategy_contribution(attribution, plots_dir)
+            if spy_benchmark is not None:
+                plot_spy_comparison(portfolio_result.equity_curve, spy_benchmark, plots_dir)
             for symbol, frame in per_symbol_results.items():
                 plot_price_with_signals(frame, plots_dir, symbol)
 
@@ -139,6 +158,10 @@ class BacktestEngine:
             output_dir=output_dir,
             plots_dir=plots_dir,
             strategy_attribution=attribution,
+            gross_exposure=portfolio_result.gross_exposure,
+            portfolio_returns=portfolio_result.portfolio_returns,
+            spy_benchmark=spy_benchmark,
+            rolling_sharpe=rolling_sharpe,
         )
 
     def _run_walkforward(self) -> EngineResult:
@@ -187,11 +210,13 @@ class BacktestEngine:
             per_symbol_results[symbol] = portfolio.backtest_symbol(stitched, 1 / max(len(data), 1))
 
         portfolio_result = portfolio.combine(per_symbol_results)
-        positions_df = pd.DataFrame({sym: df["position"] for sym, df in per_symbol_results.items()})
-        gross_exposure = positions_df.abs().sum(axis=1).mean() if not positions_df.empty else 0.0
+        positions_df = portfolio_result.positions
+        gross_exposure = portfolio_result.gross_exposure.mean() if not positions_df.empty else 0.0
         turnover = positions_df.diff().abs().sum(axis=1).mean() if not positions_df.empty else 0.0
 
         benchmark_curve = self._build_benchmark(per_symbol_results)
+        spy_benchmark = self._spy_buy_and_hold(per_symbol_results)
+        rolling_sharpe = self._rolling_sharpe(portfolio_result.portfolio_returns)
         metrics = compute_metrics(
             portfolio_result.equity_curve,
             portfolio_result.trades,
@@ -223,6 +248,14 @@ class BacktestEngine:
             plot_drawdown(portfolio_result.equity_curve, plots_dir)
             plot_monthly_returns_heatmap(monthly_returns * 100, plots_dir)
             plot_symbol_returns(portfolio_result.per_symbol, plots_dir)
+            if portfolio_result.gross_exposure is not None:
+                plot_exposure(portfolio_result.gross_exposure, plots_dir)
+            if rolling_sharpe is not None:
+                plot_rolling_sharpe(rolling_sharpe, plots_dir)
+            if attribution is not None:
+                plot_strategy_contribution(attribution, plots_dir)
+            if spy_benchmark is not None:
+                plot_spy_comparison(portfolio_result.equity_curve, spy_benchmark, plots_dir)
             for symbol, frame in per_symbol_results.items():
                 plot_price_with_signals(frame, plots_dir, symbol)
 
@@ -236,6 +269,10 @@ class BacktestEngine:
             output_dir=output_dir,
             plots_dir=plots_dir,
             strategy_attribution=attribution,
+            gross_exposure=portfolio_result.gross_exposure,
+            portfolio_returns=portfolio_result.portfolio_returns,
+            spy_benchmark=spy_benchmark,
+            rolling_sharpe=rolling_sharpe,
         )
 
     def _build_benchmark(self, per_symbol_results: Dict[str, pd.DataFrame]) -> pd.Series:
@@ -243,6 +280,26 @@ class BacktestEngine:
         returns_df.fillna(0, inplace=True)
         benchmark_returns = returns_df.mean(axis=1)
         return (1 + benchmark_returns).cumprod() * self.config.starting_cash
+
+    def _spy_buy_and_hold(self, per_symbol_results: Dict[str, pd.DataFrame]) -> pd.Series:
+        if not per_symbol_results:
+            return pd.Series(dtype=float)
+        if "SPY" in per_symbol_results:
+            spy = per_symbol_results["SPY"]
+        else:
+            spy = next(iter(per_symbol_results.values()))
+        base_price = spy["Close"].iloc[0]
+        returns = spy["Close"] / base_price
+        return returns * self.config.starting_cash
+
+    def _rolling_sharpe(self, portfolio_returns: pd.Series, window: int = 126) -> pd.Series:
+        if portfolio_returns is None or portfolio_returns.empty:
+            return pd.Series(dtype=float)
+        sharpe = portfolio_returns.rolling(window).apply(
+            lambda x: (x.mean() / x.std()) * np.sqrt(252) if x.std() > 0 else 0.0,
+            raw=False,
+        )
+        return sharpe
 
     def _monthly_returns(self, equity_curve: pd.Series) -> pd.DataFrame:
         daily_returns = equity_curve.pct_change().dropna()
