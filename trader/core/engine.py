@@ -8,7 +8,14 @@ from typing import Dict
 import pandas as pd
 
 from trader.analytics.metrics import compute_metrics
-from trader.analytics.plots import plot_equity, plot_price_with_signals, plot_symbol_returns
+from trader.analytics.plots import (
+    plot_drawdown,
+    plot_equity,
+    plot_equity_vs_benchmark,
+    plot_monthly_returns_heatmap,
+    plot_price_with_signals,
+    plot_symbol_returns,
+)
 from trader.analytics.reports import write_reports
 from trader.core.portfolio import Portfolio
 from trader.core.risk import PositionSizingConfig
@@ -23,6 +30,8 @@ class EngineResult:
     trades: pd.DataFrame
     metrics: Dict[str, float]
     symbol_frames: Dict[str, pd.DataFrame]
+    benchmark_curve: pd.Series
+    monthly_returns: pd.DataFrame
     output_dir: Path
 
 
@@ -60,12 +69,32 @@ class BacktestEngine:
             per_symbol_results[symbol] = portfolio.backtest_symbol(signals, weight)
 
         portfolio_result = portfolio.combine(per_symbol_results)
-        metrics = compute_metrics(portfolio_result.equity_curve, portfolio_result.trades, self.config.starting_cash)
+        positions_df = pd.DataFrame({sym: df["position"] for sym, df in per_symbol_results.items()})
+        gross_exposure = positions_df.abs().mean(axis=1).mean() if not positions_df.empty else 0.0
+
+        benchmark_curve = self._build_benchmark(per_symbol_results)
+        metrics = compute_metrics(
+            portfolio_result.equity_curve,
+            portfolio_result.trades,
+            self.config.starting_cash,
+            exposure=gross_exposure,
+        )
+        monthly_returns = self._monthly_returns(portfolio_result.equity_curve)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path(self.config.output_dir) / timestamp
 
-        write_reports(per_symbol_results, portfolio_result.equity_curve, portfolio_result.trades, self.config.starting_cash, output_dir)
+        write_reports(
+            per_symbol_results,
+            portfolio_result.equity_curve,
+            portfolio_result.trades,
+            self.config.starting_cash,
+            output_dir,
+            metrics,
+        )
         plot_equity(portfolio_result.equity_curve, output_dir)
+        plot_equity_vs_benchmark(portfolio_result.equity_curve, benchmark_curve, output_dir)
+        plot_drawdown(portfolio_result.equity_curve, output_dir)
+        plot_monthly_returns_heatmap(monthly_returns * 100, output_dir)
         plot_symbol_returns(portfolio_result.per_symbol, output_dir)
         for symbol, frame in per_symbol_results.items():
             plot_price_with_signals(frame, output_dir, symbol)
@@ -75,6 +104,8 @@ class BacktestEngine:
             trades=portfolio_result.trades,
             metrics=metrics,
             symbol_frames=per_symbol_results,
+            benchmark_curve=benchmark_curve,
+            monthly_returns=monthly_returns,
             output_dir=output_dir,
         )
 
@@ -119,12 +150,32 @@ class BacktestEngine:
             per_symbol_results[symbol] = portfolio.backtest_symbol(stitched, 1 / max(len(data), 1))
 
         portfolio_result = portfolio.combine(per_symbol_results)
-        metrics = compute_metrics(portfolio_result.equity_curve, portfolio_result.trades, self.config.starting_cash)
+        positions_df = pd.DataFrame({sym: df["position"] for sym, df in per_symbol_results.items()})
+        gross_exposure = positions_df.abs().mean(axis=1).mean() if not positions_df.empty else 0.0
+
+        benchmark_curve = self._build_benchmark(per_symbol_results)
+        metrics = compute_metrics(
+            portfolio_result.equity_curve,
+            portfolio_result.trades,
+            self.config.starting_cash,
+            exposure=gross_exposure,
+        )
+        monthly_returns = self._monthly_returns(portfolio_result.equity_curve)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path(self.config.output_dir) / f"walkforward_{timestamp}"
 
-        write_reports(per_symbol_results, portfolio_result.equity_curve, portfolio_result.trades, self.config.starting_cash, output_dir)
+        write_reports(
+            per_symbol_results,
+            portfolio_result.equity_curve,
+            portfolio_result.trades,
+            self.config.starting_cash,
+            output_dir,
+            metrics,
+        )
         plot_equity(portfolio_result.equity_curve, output_dir)
+        plot_equity_vs_benchmark(portfolio_result.equity_curve, benchmark_curve, output_dir)
+        plot_drawdown(portfolio_result.equity_curve, output_dir)
+        plot_monthly_returns_heatmap(monthly_returns * 100, output_dir)
         plot_symbol_returns(portfolio_result.per_symbol, output_dir)
         for symbol, frame in per_symbol_results.items():
             plot_price_with_signals(frame, output_dir, symbol)
@@ -134,8 +185,27 @@ class BacktestEngine:
             trades=portfolio_result.trades,
             metrics=metrics,
             symbol_frames=per_symbol_results,
+            benchmark_curve=benchmark_curve,
+            monthly_returns=monthly_returns,
             output_dir=output_dir,
         )
+
+    def _build_benchmark(self, per_symbol_results: Dict[str, pd.DataFrame]) -> pd.Series:
+        returns_df = pd.DataFrame({sym: df["return"] for sym, df in per_symbol_results.items()})
+        returns_df.fillna(0, inplace=True)
+        benchmark_returns = returns_df.mean(axis=1)
+        return (1 + benchmark_returns).cumprod() * self.config.starting_cash
+
+    def _monthly_returns(self, equity_curve: pd.Series) -> pd.DataFrame:
+        daily_returns = equity_curve.pct_change().dropna()
+        monthly = (1 + daily_returns).resample("M").prod() - 1
+        monthly_df = monthly.to_frame("return")
+        monthly_df["Year"] = monthly_df.index.year
+        monthly_df["Month"] = monthly_df.index.strftime("%b")
+        pivot = monthly_df.pivot(index="Year", columns="Month", values="return").fillna(0)
+        month_order = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        pivot = pivot.reindex(columns=month_order, fill_value=0)
+        return pivot
 
     def run(self) -> EngineResult:
         mode = self.config.mode

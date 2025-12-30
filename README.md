@@ -64,13 +64,18 @@ python -m trader.backtest --list-strategies
 
 Run a backtest from config:
 ```bash
-python -m trader.backtest --config config.yaml
+python -m trader.cli --config config.yaml
 ```
 
 Run walk-forward or paper modes:
 ```bash
-python -m trader.backtest --config config.yaml --run walkforward
-python -m trader.backtest --config config.yaml --run paper
+python -m trader.cli --config config.yaml --run walkforward
+python -m trader.cli --config config.yaml --run paper
+```
+
+Generate an HTML performance report (creates `outputs/<timestamp>/report.html`):
+```bash
+python -m trader.cli report --config configs/example.yaml
 ```
 
 ## Included Strategies
@@ -86,9 +91,10 @@ python -m trader.backtest --config config.yaml --run paper
 - Portfolio-level aggregation across multiple symbols
 
 ## Outputs (saved under `outputs/<timestamp>/`)
+- `report.html` with equity vs buy-and-hold, drawdown, monthly returns, and metrics
 - `equity_curve.csv` and PNG plots (equity, per-symbol cumulative returns, price with signals)
 - `trades.csv` trade log
-- `metrics.json` with CAGR, Sharpe, Sortino, max drawdown, hit rate, expectancy
+- `metrics.json` with CAGR, Sharpe, Sortino, max drawdown, hit rate, expectancy, profit factor, exposure
 - Per-symbol signal/price CSVs
 
 ## Extensibility Hooks
