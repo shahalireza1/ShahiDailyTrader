@@ -4,7 +4,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import yaml
+try:
+    import yaml
+except ImportError:  # pragma: no cover - dependency is optional at import time for tests
+    yaml = None
 
 
 @dataclass
@@ -56,6 +59,9 @@ def _merge_dict(default: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, 
 
 
 def load_config(path: Path) -> Config:
+    if yaml is None:
+        raise ImportError("PyYAML is required to load configuration files. Please install PyYAML.")
+
     if not path.exists():
         raise FileNotFoundError(f"Config file not found: {path}")
 
