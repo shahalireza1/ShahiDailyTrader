@@ -19,6 +19,7 @@ def compute_metrics(
     trades: pd.DataFrame,
     starting_cash: float,
     exposure: float | None = None,
+    turnover: float | None = None,
 ) -> dict:
     daily_returns = equity_curve.pct_change().dropna()
     total_return = (equity_curve.iloc[-1] - starting_cash) / starting_cash if not equity_curve.empty else 0.0
@@ -56,6 +57,7 @@ def compute_metrics(
             profit_factor = float("inf")
 
     gross_exposure = float(exposure) if exposure is not None else 0.0
+    turnover_val = float(turnover) if turnover is not None else 0.0
 
     return {
         "total_return": float(total_return),
@@ -68,4 +70,5 @@ def compute_metrics(
         "num_trades": int(num_trades),
         "profit_factor": float(profit_factor),
         "exposure": gross_exposure,
+        "turnover": turnover_val,
     }

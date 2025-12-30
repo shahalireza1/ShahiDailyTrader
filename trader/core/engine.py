@@ -35,6 +35,7 @@ class EngineResult:
     monthly_returns: pd.DataFrame
     output_dir: Path
     plots_dir: Optional[Path] = None
+    strategy_attribution: Optional[pd.DataFrame] = None
 
 
 class BacktestEngine:
@@ -44,6 +45,18 @@ class BacktestEngine:
         self.enable_plots = enable_plots
 
     def _instantiate_strategy(self) -> Strategy:
+        strategies_payload = [
+            {"name": cfg.name, "parameters": cfg.parameters} for cfg in (self.config.strategies or [self.config.strategy])
+        ]
+        if (
+            self.config.strategy.name == "ensemble"
+            or len(self.config.strategies) > 1
+            or bool(self.config.ensemble)
+        ):
+            ensemble_params = dict(self.config.ensemble)
+            if self.config.strategy.name == "ensemble":
+                ensemble_params.update(self.config.strategy.parameters)
+            return registry.create("ensemble", strategies=strategies_payload, **ensemble_params)
         return registry.create(self.config.strategy.name, **self.config.strategy.parameters)
 
     def _run_single_backtest(self) -> EngineResult:
@@ -64,6 +77,11 @@ class BacktestEngine:
             slippage_bps=self.config.slippage_bps,
             risk_config=risk_cfg,
             max_drawdown=self.config.risk.max_drawdown,
+            max_drawdown_stop=self.config.risk.max_drawdown_stop,
+            drawdown_safe_fraction=self.config.risk.drawdown_safe_fraction,
+            max_gross_exposure=self.config.risk.max_gross_exposure,
+            max_position_per_symbol=self.config.risk.max_position_per_symbol,
+            trade_cooldown_days=self.config.risk.trade_cooldown_days,
         )
         per_symbol_results: Dict[str, pd.DataFrame] = {}
         weight = 1 / max(len(data), 1)
@@ -73,7 +91,8 @@ class BacktestEngine:
 
         portfolio_result = portfolio.combine(per_symbol_results)
         positions_df = pd.DataFrame({sym: df["position"] for sym, df in per_symbol_results.items()})
-        gross_exposure = positions_df.abs().mean(axis=1).mean() if not positions_df.empty else 0.0
+        gross_exposure = positions_df.abs().sum(axis=1).mean() if not positions_df.empty else 0.0
+        turnover = positions_df.diff().abs().sum(axis=1).mean() if not positions_df.empty else 0.0
 
         benchmark_curve = self._build_benchmark(per_symbol_results)
         metrics = compute_metrics(
@@ -81,7 +100,9 @@ class BacktestEngine:
             portfolio_result.trades,
             self.config.starting_cash,
             exposure=gross_exposure,
+            turnover=turnover,
         )
+        attribution = self._strategy_attribution(per_symbol_results)
         monthly_returns = self._monthly_returns(portfolio_result.equity_curve)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path(self.config.output_dir) / timestamp
@@ -94,6 +115,8 @@ class BacktestEngine:
             output_dir,
             metrics,
         )
+        if not attribution.empty:
+            attribution.to_csv(output_dir / "strategy_attribution.csv")
         plots_dir = None
         if self.enable_plots:
             plots_dir = output_dir / "plots"
@@ -115,6 +138,7 @@ class BacktestEngine:
             monthly_returns=monthly_returns,
             output_dir=output_dir,
             plots_dir=plots_dir,
+            strategy_attribution=attribution,
         )
 
     def _run_walkforward(self) -> EngineResult:
@@ -135,6 +159,11 @@ class BacktestEngine:
             slippage_bps=self.config.slippage_bps,
             risk_config=risk_cfg,
             max_drawdown=self.config.risk.max_drawdown,
+            max_drawdown_stop=self.config.risk.max_drawdown_stop,
+            drawdown_safe_fraction=self.config.risk.drawdown_safe_fraction,
+            max_gross_exposure=self.config.risk.max_gross_exposure,
+            max_position_per_symbol=self.config.risk.max_position_per_symbol,
+            trade_cooldown_days=self.config.risk.trade_cooldown_days,
         )
 
         per_symbol_results: Dict[str, pd.DataFrame] = {}
@@ -159,7 +188,8 @@ class BacktestEngine:
 
         portfolio_result = portfolio.combine(per_symbol_results)
         positions_df = pd.DataFrame({sym: df["position"] for sym, df in per_symbol_results.items()})
-        gross_exposure = positions_df.abs().mean(axis=1).mean() if not positions_df.empty else 0.0
+        gross_exposure = positions_df.abs().sum(axis=1).mean() if not positions_df.empty else 0.0
+        turnover = positions_df.diff().abs().sum(axis=1).mean() if not positions_df.empty else 0.0
 
         benchmark_curve = self._build_benchmark(per_symbol_results)
         metrics = compute_metrics(
@@ -167,7 +197,9 @@ class BacktestEngine:
             portfolio_result.trades,
             self.config.starting_cash,
             exposure=gross_exposure,
+            turnover=turnover,
         )
+        attribution = self._strategy_attribution(per_symbol_results)
         monthly_returns = self._monthly_returns(portfolio_result.equity_curve)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path(self.config.output_dir) / f"walkforward_{timestamp}"
@@ -180,6 +212,8 @@ class BacktestEngine:
             output_dir,
             metrics,
         )
+        if not attribution.empty:
+            attribution.to_csv(output_dir / "strategy_attribution.csv")
         plots_dir = None
         if self.enable_plots:
             plots_dir = output_dir / "plots"
@@ -201,6 +235,7 @@ class BacktestEngine:
             monthly_returns=monthly_returns,
             output_dir=output_dir,
             plots_dir=plots_dir,
+            strategy_attribution=attribution,
         )
 
     def _build_benchmark(self, per_symbol_results: Dict[str, pd.DataFrame]) -> pd.Series:
@@ -230,3 +265,18 @@ class BacktestEngine:
             # Placeholder identical to backtest for now
             return self._run_single_backtest()
         raise ValueError(f"Unsupported mode: {mode}")
+
+    def _strategy_attribution(self, per_symbol_results: Dict[str, pd.DataFrame]) -> pd.DataFrame:
+        records = []
+        for symbol, df in per_symbol_results.items():
+            combined = df.get("signal", df.get("position", pd.Series(dtype=float)))
+            for col in df.columns:
+                if col.startswith("signal_"):
+                    name = col.replace("signal_", "")
+                    corr = combined.corr(df[col]) if len(combined) and df[col].std() != 0 else 0.0
+                    overlap = float((combined * df[col]).mean()) if len(combined) else 0.0
+                    records.append({"strategy": name, "symbol": symbol, "overlap": overlap, "correlation": corr})
+        if not records:
+            return pd.DataFrame()
+        grouped = pd.DataFrame(records).groupby("strategy").agg({"overlap": "mean", "correlation": "mean"})
+        return grouped.sort_values("overlap", ascending=False)

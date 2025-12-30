@@ -19,11 +19,17 @@ class StrategyConfig:
 @dataclass
 class RiskConfig:
     max_drawdown: float = 0.2
+    max_drawdown_stop: Optional[float] = None
+    drawdown_safe_fraction: float = 0.0
+    max_gross_exposure: float = 0.35
+    max_position_per_symbol: float = 0.01
+    vol_target_annual: Optional[float] = None
     target_volatility: Optional[float] = None
     vol_lookback: int = 20
     position_mode: str = "fixed_fraction"
     position_fraction: float = 1.0
     kelly_safety: float = 0.5
+    trade_cooldown_days: int = 0
 
 
 @dataclass
@@ -43,6 +49,8 @@ class Config:
     slippage_bps: float = 1.0
     starting_cash: float = 100_000.0
     strategy: StrategyConfig = field(default_factory=StrategyConfig)
+    strategies: List[StrategyConfig] = field(default_factory=list)
+    ensemble: Dict[str, Any] = field(default_factory=dict)
     risk: RiskConfig = field(default_factory=RiskConfig)
     output_dir: Path = Path("outputs")
     walkforward: WalkForwardConfig = field(default_factory=WalkForwardConfig)
@@ -72,8 +80,10 @@ def load_config(path: Path) -> Config:
     raw = _merge_dict(cfg.__dict__, data)
 
     strategy_data = raw.get("strategy", {}) or {}
+    strategies_data = raw.get("strategies") or []
     risk_data = raw.get("risk", {}) or {}
     walk_data = raw.get("walkforward", {}) or {}
+    ensemble_data = raw.get("ensemble", {}) or {}
 
     cfg.symbols = list(raw.get("symbols", []))
     cfg.start = raw.get("start", cfg.start)
@@ -88,15 +98,30 @@ def load_config(path: Path) -> Config:
         name=str(strategy_data.get("name", cfg.strategy.name)),
         parameters=dict(strategy_data.get("parameters", cfg.strategy.parameters)),
     )
+    cfg.strategies = [
+        StrategyConfig(name=str(item.get("name", cfg.strategy.name)), parameters=dict(item.get("parameters", {})))
+        for item in strategies_data
+        if item is not None
+    ]
+    if not cfg.strategies:
+        cfg.strategies = [cfg.strategy]
 
     cfg.risk = RiskConfig(
         max_drawdown=float(risk_data.get("max_drawdown", cfg.risk.max_drawdown)),
-        target_volatility=risk_data.get("target_volatility", cfg.risk.target_volatility),
+        max_drawdown_stop=risk_data.get("max_drawdown_stop", cfg.risk.max_drawdown_stop),
+        drawdown_safe_fraction=float(risk_data.get("drawdown_safe_fraction", cfg.risk.drawdown_safe_fraction)),
+        max_gross_exposure=float(risk_data.get("max_gross_exposure", cfg.risk.max_gross_exposure)),
+        max_position_per_symbol=float(risk_data.get("max_position_per_symbol", cfg.risk.max_position_per_symbol)),
+        vol_target_annual=risk_data.get("vol_target_annual", cfg.risk.vol_target_annual),
+        target_volatility=risk_data.get("target_volatility", risk_data.get("vol_target_annual", cfg.risk.target_volatility)),
         vol_lookback=int(risk_data.get("vol_lookback", cfg.risk.vol_lookback)),
         position_mode=str(risk_data.get("position_mode", cfg.risk.position_mode)),
         position_fraction=float(risk_data.get("position_fraction", cfg.risk.position_fraction)),
         kelly_safety=float(risk_data.get("kelly_safety", cfg.risk.kelly_safety)),
+        trade_cooldown_days=int(risk_data.get("trade_cooldown_days", cfg.risk.trade_cooldown_days)),
     )
+
+    cfg.ensemble = dict(ensemble_data)
 
     cfg.walkforward = WalkForwardConfig(
         train_window=int(walk_data.get("train_window", cfg.walkforward.train_window)),

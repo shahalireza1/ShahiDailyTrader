@@ -1,0 +1,33 @@
+symbols:
+  - SPY
+start: "2021-01-01"
+end: "2023-01-01"
+mode: backtest
+fees_bps: 1.0
+slippage_bps: 1.0
+starting_cash: 100000
+strategies:
+  - name: sma_rsi
+    parameters:
+      fast: 15
+      slow: 40
+      rsi_period: 10
+      rsi_threshold: 55
+  - name: breakout
+    parameters:
+      lookback: 30
+  - name: momentum
+    parameters:
+      lookback: 60
+      threshold: 0.0
+ensemble:
+  mode: voting
+  threshold: 0.6
+risk:
+  max_drawdown: 0.3
+  max_gross_exposure: 0.4
+  max_position_per_symbol: 0.02
+  vol_target_annual: 0.1
+  vol_lookback: 30
+  trade_cooldown_days: 2
+output_dir: outputs
