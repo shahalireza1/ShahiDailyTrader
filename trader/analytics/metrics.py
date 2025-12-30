@@ -14,7 +14,12 @@ def _safe_annualized_return(equity_curve: pd.Series, starting_cash: float) -> fl
     return (equity_curve.iloc[-1] / starting_cash) ** (1 / trading_years) - 1
 
 
-def compute_metrics(equity_curve: pd.Series, trades: pd.DataFrame, starting_cash: float) -> dict:
+def compute_metrics(
+    equity_curve: pd.Series,
+    trades: pd.DataFrame,
+    starting_cash: float,
+    exposure: float | None = None,
+) -> dict:
     daily_returns = equity_curve.pct_change().dropna()
     total_return = (equity_curve.iloc[-1] - starting_cash) / starting_cash if not equity_curve.empty else 0.0
     cagr = _safe_annualized_return(equity_curve, starting_cash)
@@ -34,6 +39,7 @@ def compute_metrics(equity_curve: pd.Series, trades: pd.DataFrame, starting_cash
 
     win_rate = 0.0
     expectancy = 0.0
+    profit_factor = 0.0
     num_trades = len(trades)
     if num_trades:
         wins = trades[trades["pnl"] > 0]
@@ -42,6 +48,14 @@ def compute_metrics(equity_curve: pd.Series, trades: pd.DataFrame, starting_cash
         avg_win = wins["pnl"].mean() if not wins.empty else 0.0
         avg_loss = losses["pnl"].mean() if not losses.empty else 0.0
         expectancy = win_rate * avg_win + (1 - win_rate) * avg_loss
+        gross_wins = wins["pnl"].sum()
+        gross_losses = losses["pnl"].sum()
+        if gross_losses < 0:
+            profit_factor = gross_wins / abs(gross_losses)
+        elif gross_wins > 0:
+            profit_factor = float("inf")
+
+    gross_exposure = float(exposure) if exposure is not None else 0.0
 
     return {
         "total_return": float(total_return),
@@ -52,4 +66,6 @@ def compute_metrics(equity_curve: pd.Series, trades: pd.DataFrame, starting_cash
         "win_rate": float(win_rate),
         "expectancy": float(expectancy),
         "num_trades": int(num_trades),
+        "profit_factor": float(profit_factor),
+        "exposure": gross_exposure,
     }
