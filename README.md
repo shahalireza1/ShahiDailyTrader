@@ -91,6 +91,15 @@ python -m trader.cli --config configs/example.yaml --run report
 python -m trader.cli report --config configs/example.yaml
 # With ensembles
 python -m trader.cli report --config configs/ensemble_risk_budget.yaml
+# Windows-friendly backtests with report generation via the backtest entrypoint
+python -m trader.backtest --config configs\ensemble_momentum_biased.yaml --run report
+python -m trader.backtest --config configs\ensemble_risk_budgeted.yaml --run report
+python -m trader.backtest --config config.yaml --run report
+```
+
+Run the return-seeking experiment sweep (writes reports per config and `outputs/experiments/summary.csv` filtered by risk constraints):
+```bash
+python -m trader.analytics.experiment_runner
 ```
 
 ## Included Strategies
