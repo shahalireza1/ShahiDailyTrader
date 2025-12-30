@@ -67,6 +67,11 @@ Run a backtest from config:
 python -m trader.cli --config config.yaml
 ```
 
+Run a backtest and emit plots:
+```bash
+python -m trader.cli --config config.yaml --plot
+```
+
 Run walk-forward or paper modes:
 ```bash
 python -m trader.cli --config config.yaml --run walkforward
@@ -91,10 +96,9 @@ python -m trader.cli report --config configs/example.yaml
 - Portfolio-level aggregation across multiple symbols
 
 ## Outputs (saved under `outputs/<timestamp>/`)
-- `report.html` with equity vs buy-and-hold, drawdown, monthly returns, and metrics
-- `equity_curve.csv` and PNG plots (equity, per-symbol cumulative returns, price with signals)
-- `trades.csv` trade log
-- `metrics.json` with CAGR, Sharpe, Sortino, max drawdown, hit rate, expectancy, profit factor, exposure
+- `equity_curve.csv`, `trades.csv`, and `metrics.json` (CAGR, total return, Sharpe, max drawdown, win rate)
+- Plot images under `outputs/<timestamp>/plots/` including equity vs buy-and-hold with drawdown, drawdown-only, monthly heatmap, and per-symbol returns
+- `report.html` with equity vs buy-and-hold, drawdown, monthly returns, and metrics (generated via `python -m trader.cli report --config ...`)
 - Per-symbol signal/price CSVs
 
 ## Extensibility Hooks

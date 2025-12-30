@@ -14,6 +14,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", type=Path, default=Path("config.yaml"), help="Path to YAML config")
     parser.add_argument("--list-strategies", action="store_true", help="List available strategies")
     parser.add_argument("--run", choices=["backtest", "walkforward", "paper"], help="Execution mode")
+    parser.add_argument("--plot", action="store_true", help="Generate plots for the run")
 
     subparsers = parser.add_subparsers(dest="command")
     report_parser = subparsers.add_parser("report", help="Run a backtest and generate an HTML report")
@@ -28,16 +29,17 @@ def run_cli(args: argparse.Namespace) -> None:
     if command == "report":
         config = load_config(args.config)
         config.mode = "backtest"
-        engine = BacktestEngine(config)
+        engine = BacktestEngine(config, enable_plots=True)
         result = engine.run()
 
+        plots_dir = result.plots_dir or result.output_dir
         report_path = build_html_report(
             result.output_dir,
             result.metrics,
             result.monthly_returns,
-            result.output_dir / "equity_vs_benchmark.png",
-            result.output_dir / "drawdown.png",
-            result.output_dir / "monthly_heatmap.png",
+            plots_dir / "equity_vs_benchmark.png",
+            plots_dir / "drawdown.png",
+            plots_dir / "monthly_heatmap.png",
         )
         print("\nReport ready!")
         print(f"Outputs saved to: {result.output_dir.resolve()}")
@@ -54,7 +56,7 @@ def run_cli(args: argparse.Namespace) -> None:
     if args.run:
         config.mode = args.run
 
-    engine = BacktestEngine(config)
+    engine = BacktestEngine(config, enable_plots=args.plot)
     result = engine.run()
 
     print("\nRun complete!")
