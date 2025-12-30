@@ -19,7 +19,12 @@ def rsi(series: pd.Series, period: int = 14) -> pd.Series:
     avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
     rs = avg_gain / avg_loss.replace(0, pd.NA)
     result = 100 - (100 / (1 + rs))
-    return result.fillna(0)
+    result = result.copy()
+    flat_mask = (avg_gain == 0) & (avg_loss == 0)
+    result[avg_loss == 0] = 100
+    result[avg_gain == 0] = 0
+    result[flat_mask] = 50
+    return result.fillna(50)
 
 
 def zscore(series: pd.Series, window: int = 20) -> pd.Series:

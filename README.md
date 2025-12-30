@@ -64,7 +64,7 @@ python -m trader.backtest --list-strategies
 
 Run a backtest from config:
 ```bash
-python -m trader.cli --config config.yaml
+python -m trader.cli --config config.yaml --run backtest
 ```
 
 Run a backtest and emit plots:
@@ -78,8 +78,10 @@ python -m trader.cli --config config.yaml --run walkforward
 python -m trader.cli --config config.yaml --run paper
 ```
 
-Generate an HTML performance report (creates `outputs/<timestamp>/report.html`):
+Generate an HTML performance report (creates `outputs/<run_id>/report.html` and plots under `outputs/<run_id>/plots/`):
 ```bash
+python -m trader.cli --config configs/example.yaml --run report
+# or
 python -m trader.cli report --config configs/example.yaml
 ```
 
