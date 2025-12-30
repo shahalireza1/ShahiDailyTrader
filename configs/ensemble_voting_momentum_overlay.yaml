@@ -1,0 +1,37 @@
+symbols:
+  - SPY
+  - QQQ
+start: "2018-01-01"
+end: "2024-01-01"
+mode: backtest
+fees_bps: 1.0
+slippage_bps: 1.0
+starting_cash: 150000
+strategies:
+  - name: sma_cross
+    parameters:
+      fast: 20
+      slow: 80
+  - name: momentum
+    parameters:
+      lookback: 90
+      threshold: 0.0
+  - name: breakout
+    parameters:
+      lookback: 40
+ensemble:
+  mode: voting
+  threshold: 0.67
+  trend_filter_window: 200
+risk:
+  max_drawdown: 0.22
+  max_drawdown_stop: 0.15
+  drawdown_safe_fraction: 0.35
+  max_gross_exposure: 0.65
+  max_position_per_symbol: 0.3
+  vol_target_annual: null
+  vol_lookback: 50
+  trade_cooldown_days: 0
+  position_mode: fixed_fraction
+  position_fraction: 1.0
+output_dir: outputs

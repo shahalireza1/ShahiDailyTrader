@@ -1,27 +1,30 @@
 symbols:
   - SPY
   - QQQ
-start: "2020-01-01"
-end: "2023-12-31"
+  - IWM
+start: "2018-01-01"
+end: "2024-01-01"
 mode: backtest
 fees_bps: 1.0
 slippage_bps: 1.0
 starting_cash: 200000
 strategies:
-  - name: sma_cross
-    parameters:
-      fast: 10
-      slow: 60
   - name: momentum
     parameters:
-      lookback: 90
-      threshold: 0.02
+      lookback: 120
+      threshold: 0.01
+  - name: sma_cross
+    parameters:
+      fast: 30
+      slow: 120
+  - name: buy_hold
+    parameters: {}
 ensemble:
   mode: risk_budget
   vol_lookback: 60
-  min_weight: 0.15
+  min_weight: 0.12
 risk:
-  max_drawdown: 0.25
+  max_drawdown: 0.22
   max_drawdown_stop: 0.15
   drawdown_safe_fraction: 0.4
   max_gross_exposure: 0.6

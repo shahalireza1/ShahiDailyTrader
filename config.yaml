@@ -16,6 +16,11 @@ strategy:
     rsi_threshold: 55
 risk:
   max_drawdown: 0.25
+  max_drawdown_stop: 0.15
+  drawdown_safe_fraction: 0.35
+  max_gross_exposure: 0.6
+  max_position_per_symbol: 0.25
+  trade_cooldown_days: 1
   target_volatility: 0.15
   vol_lookback: 20
   position_mode: fixed_fraction

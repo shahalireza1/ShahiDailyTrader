@@ -101,10 +101,22 @@ class BreakoutStrategy(Strategy):
         return df
 
 
+@register_strategy
+class BuyHoldStrategy(Strategy):
+    name = "buy_hold"
+    description = "Buy and hold baseline"
+
+    def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
+        df = data.copy()
+        df["signal"] = 1.0
+        return df
+
+
 __all__ = [
     "SMARSIStrategy",
     "SMACrossStrategy",
     "MeanReversionStrategy",
     "MomentumStrategy",
     "BreakoutStrategy",
+    "BuyHoldStrategy",
 ]

@@ -22,12 +22,15 @@ strategies:
       threshold: 0.0
 ensemble:
   mode: voting
-  threshold: 0.6
+  threshold: 0.67
+  trend_filter_window: 200
 risk:
   max_drawdown: 0.3
-  max_gross_exposure: 0.4
-  max_position_per_symbol: 0.02
-  vol_target_annual: 0.1
-  vol_lookback: 30
-  trade_cooldown_days: 2
-output_dir: outputs
+  max_drawdown_stop: 0.15
+  drawdown_safe_fraction: 0.35
+  max_gross_exposure: 0.6
+  max_position_per_symbol: 0.25
+  vol_target_annual: null
+  vol_lookback: 40
+  trade_cooldown_days: 0
+  output_dir: outputs

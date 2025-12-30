@@ -5,7 +5,13 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
-from trader.core.risk import PositionSizingConfig, apply_drawdown_stop, apply_volatility_target, position_sizer
+from trader.core.risk import (
+    PositionSizingConfig,
+    apply_drawdown_stop,
+    apply_volatility_target,
+    dynamic_exposure_scaler,
+    position_sizer,
+)
 
 
 @dataclass
@@ -23,6 +29,9 @@ class PortfolioResult:
     equity_curve: pd.Series
     trades: pd.DataFrame
     per_symbol: Dict[str, pd.Series]
+    positions: pd.DataFrame
+    gross_exposure: pd.Series
+    portfolio_returns: pd.Series
 
 
 class Portfolio:
@@ -146,6 +155,16 @@ class Portfolio:
         positions_df = pd.DataFrame({sym: df["position"] for sym, df in per_symbol_results.items()})
         positions_df.fillna(0, inplace=True)
 
+        base_portfolio_returns = returns_df.mean(axis=1)
+        risk_scaler = dynamic_exposure_scaler(
+            base_portfolio_returns,
+            drawdown_stop=self.max_drawdown_stop or self.max_drawdown,
+            safe_fraction=self.drawdown_safe_fraction,
+            rolling_window=self.risk_config.vol_lookback,
+        )
+        if not risk_scaler.empty:
+            positions_df = positions_df.mul(risk_scaler, axis=0)
+
         if self.max_gross_exposure and self.max_gross_exposure < 1.0:
             gross = positions_df.abs().sum(axis=1)
             scaling = gross.copy()
@@ -168,6 +187,9 @@ class Portfolio:
         active_mask = apply_drawdown_stop(equity_curve, stop_threshold, self.drawdown_safe_fraction)
         equity_curve = (1 + portfolio_returns * active_mask).cumprod() * self.starting_cash
 
+        effective_positions = positions_df.mul(active_mask, axis=0)
+        gross_exposure = effective_positions.abs().sum(axis=1)
+
         all_trades: List[Trade] = []
         for symbol, df in per_symbol_results.items():
             trades = self._generate_trades(df.assign(position=df["position"] * active_mask), symbol)
@@ -178,4 +200,7 @@ class Portfolio:
             equity_curve=equity_curve,
             trades=trades_df,
             per_symbol={sym: df["strategy_return"] for sym, df in per_symbol_results.items()},
+            positions=effective_positions,
+            gross_exposure=gross_exposure,
+            portfolio_returns=portfolio_returns * active_mask,
         )

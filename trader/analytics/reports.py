@@ -52,6 +52,10 @@ def build_html_report(
     drawdown_plot: Path,
     heatmap_plot: Path,
     strategy_attribution: pd.DataFrame | None = None,
+    exposure_plot: Path | None = None,
+    rolling_sharpe_plot: Path | None = None,
+    strategy_contribution_plot: Path | None = None,
+    spy_comparison_plot: Path | None = None,
 ) -> Path:
     metrics_df = pd.DataFrame(metrics, index=["value"]).T
     metrics_html = metrics_df.to_html(float_format=lambda x: f"{x:.4f}")
@@ -64,6 +68,27 @@ def build_html_report(
         attribution_html = "<h2>Strategy Attribution</h2>" + strategy_attribution.to_html(
             float_format=lambda x: f"{x:.4f}"
         )
+
+    exposure_img = (
+        f'<h2>Exposure Over Time</h2><img src="data:image/png;base64,{_encode_img(exposure_plot)}" alt="Exposure" />'
+        if exposure_plot and exposure_plot.exists()
+        else ""
+    )
+    rolling_img = (
+        f'<h2>Rolling 6-Month Sharpe</h2><img src="data:image/png;base64,{_encode_img(rolling_sharpe_plot)}" alt="Rolling Sharpe" />'
+        if rolling_sharpe_plot and rolling_sharpe_plot.exists()
+        else ""
+    )
+    spy_img = (
+        f'<h2>SPY Buy & Hold Comparison</h2><img src="data:image/png;base64,{_encode_img(spy_comparison_plot)}" alt="SPY Comparison" />'
+        if spy_comparison_plot and spy_comparison_plot.exists()
+        else ""
+    )
+    contribution_img = (
+        f'<h2>Strategy Contribution</h2><img src="data:image/png;base64,{_encode_img(strategy_contribution_plot)}" alt="Strategy Contribution" />'
+        if strategy_contribution_plot and strategy_contribution_plot.exists()
+        else ""
+    )
 
     html = f"""
     <html>
@@ -90,6 +115,10 @@ def build_html_report(
         <h2>Monthly Returns</h2>
         <img src="data:image/png;base64,{_encode_img(heatmap_plot)}" alt="Monthly Returns Heatmap" />
         {monthly_html}
+        {exposure_img}
+        {rolling_img}
+        {spy_img}
+        {contribution_img}
         {attribution_html}
       </body>
     </html>

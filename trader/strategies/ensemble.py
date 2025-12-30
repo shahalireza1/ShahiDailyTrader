@@ -16,6 +16,8 @@ class EnsembleParameters:
     threshold: float = 0.5
     vol_lookback: int = 20
     min_weight: float = 0.0
+    trend_filter_window: Optional[int] = None
+    trend_filter_column: str = "Close"
 
 
 @register_strategy
@@ -49,7 +51,7 @@ class EnsembleStrategy(Strategy):
 
     def _resolve_weights(self, signal_frame: pd.DataFrame) -> pd.DataFrame:
         mode = self.params.mode
-        if mode in {"fixed_weights", "fixed"} and self.params.weights:
+        if mode in {"fixed_weights", "fixed", "fixed_weight"} and self.params.weights:
             raw = pd.Series(self.params.weights)
             aligned = raw.reindex(signal_frame.columns).fillna(0)
             norm = aligned / aligned.abs().sum() if aligned.abs().sum() > 0 else aligned
@@ -87,6 +89,10 @@ class EnsembleStrategy(Strategy):
         signals_df = signals_df.reindex(data.index).fillna(method="ffill").fillna(0)
         weights_df = self._resolve_weights(signals_df)
         combined_signal = self._combine_signals(signals_df)
+        if self.params.trend_filter_window:
+            close_col = data.get(self.params.trend_filter_column, data["Close"])
+            long_trend = close_col.rolling(int(self.params.trend_filter_window)).mean()
+            combined_signal = combined_signal.where(close_col > long_trend, 0.0)
         df = data.copy()
         for col in signals_df.columns:
             df[col] = signals_df[col]
