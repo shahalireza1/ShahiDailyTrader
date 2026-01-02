@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -7,6 +7,7 @@ from typing import Dict, Optional
 
 import numpy as np
 import pandas as pd
+import yaml
 
 from trader.analytics.metrics import compute_metrics
 from trader.analytics.plots import (
@@ -22,12 +23,12 @@ from trader.analytics.plots import (
     plot_symbol_returns,
     plot_strategy_contribution,
 )
-from trader.analytics.reports import write_reports
+from trader.analytics.reports import generate_html_report, write_reports
 from trader.core.portfolio import Portfolio
 from trader.core.risk import PositionSizingConfig
 from trader.data.loaders import DataLoader, DataRequest
 from trader.strategies.base import Strategy, registry
-from trader.utils.config import Config
+from trader.utils.config import Config, config_to_dict
 
 
 @dataclass
@@ -45,13 +46,15 @@ class EngineResult:
     portfolio_returns: Optional[pd.Series] = None
     spy_benchmark: Optional[pd.Series] = None
     rolling_sharpe: Optional[pd.Series] = None
+    report_path: Optional[Path] = None
 
 
 class BacktestEngine:
-    def __init__(self, config: Config, enable_plots: bool = False) -> None:
+    def __init__(self, config: Config, enable_plots: bool = False, generate_html: bool = False) -> None:
         self.config = config
         self.loader = DataLoader()
         self.enable_plots = enable_plots
+        self.generate_html = generate_html
 
     def _instantiate_strategy(self) -> Strategy:
         strategies_payload = [
@@ -67,6 +70,30 @@ class BacktestEngine:
                 ensemble_params.update(self.config.strategy.parameters)
             return registry.create("ensemble", strategies=strategies_payload, **ensemble_params)
         return registry.create(self.config.strategy.name, **self.config.strategy.parameters)
+
+    def _create_backtest_report(
+        self, output_dir: Path, equity_curve: pd.Series, trades: pd.DataFrame, metrics: Dict[str, float]
+    ) -> Path:
+        equity_df = equity_curve.rename("equity").to_frame()
+        trades_df = trades.copy()
+        summary = {
+            "cagr": float(metrics.get("cagr", 0.0)),
+            "total_return": float(metrics.get("total_return", 0.0)),
+            "max_drawdown": float(metrics.get("max_drawdown", 0.0)),
+            "sharpe": float(metrics.get("sharpe", 0.0)),
+            "num_trades": int(metrics.get("num_trades", 0)),
+            "win_rate": float(metrics.get("win_rate", 0.0)),
+        }
+
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "equity.csv").write_text(equity_df.to_csv())
+        trades_path = output_dir / "trades.csv"
+        trades_df.to_csv(trades_path, index=False)
+        (output_dir / "summary.json").write_text(json.dumps(summary, indent=2))
+
+        config_dict = config_to_dict(self.config)
+        (output_dir / "config_used.yaml").write_text(yaml.safe_dump(config_dict, sort_keys=False))
+        return generate_html_report(output_dir, summary, equity_df, trades_df, config_dict)
 
     def _run_single_backtest(self) -> EngineResult:
         strategy = self._instantiate_strategy()
@@ -126,6 +153,9 @@ class BacktestEngine:
             output_dir,
             metrics,
         )
+        report_path = None
+        if self.generate_html:
+            report_path = self._create_backtest_report(output_dir, portfolio_result.equity_curve, portfolio_result.trades, metrics)
         if not attribution.empty:
             attribution.to_csv(output_dir / "strategy_attribution.csv")
         plots_dir = None
@@ -162,6 +192,7 @@ class BacktestEngine:
             portfolio_returns=portfolio_result.portfolio_returns,
             spy_benchmark=spy_benchmark,
             rolling_sharpe=rolling_sharpe,
+            report_path=report_path,
         )
 
     def _run_walkforward(self) -> EngineResult:
@@ -237,6 +268,9 @@ class BacktestEngine:
             output_dir,
             metrics,
         )
+        report_path = None
+        if self.generate_html:
+            report_path = self._create_backtest_report(output_dir, portfolio_result.equity_curve, portfolio_result.trades, metrics)
         if not attribution.empty:
             attribution.to_csv(output_dir / "strategy_attribution.csv")
         plots_dir = None
@@ -273,6 +307,7 @@ class BacktestEngine:
             portfolio_returns=portfolio_result.portfolio_returns,
             spy_benchmark=spy_benchmark,
             rolling_sharpe=rolling_sharpe,
+            report_path=report_path,
         )
 
     def _build_benchmark(self, per_symbol_results: Dict[str, pd.DataFrame]) -> pd.Series:

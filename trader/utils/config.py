@@ -46,7 +46,7 @@ class Config:
     end: str = "2024-01-01"
     mode: str = "backtest"
     fees_bps: float = 1.0
-    slippage_bps: float = 1.0
+    slippage_bps: float = 2.0
     starting_cash: float = 100_000.0
     strategy: StrategyConfig = field(default_factory=StrategyConfig)
     strategies: List[StrategyConfig] = field(default_factory=list)
@@ -148,3 +148,18 @@ def load_config(path: Path) -> Config:
     )
 
     return cfg
+
+
+def config_to_dict(config: Config) -> Dict[str, Any]:
+    def convert(value: Any) -> Any:
+        if isinstance(value, Path):
+            return str(value)
+        if is_dataclass(value):
+            return {k: convert(v) for k, v in asdict(value).items()}
+        if isinstance(value, dict):
+            return {k: convert(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [convert(item) for item in value]
+        return value
+
+    return convert(config)

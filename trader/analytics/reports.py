@@ -6,6 +6,9 @@ from pathlib import Path
 from typing import Dict
 
 import pandas as pd
+import plotly.graph_objs as go
+from plotly.offline import plot as plotly_plot
+import yaml
 
 from trader.analytics.metrics import compute_metrics
 
@@ -38,6 +41,100 @@ def write_reports(
         frame.to_csv(output_dir / f"{symbol}_signals_and_prices.csv")
 
     return paths
+
+
+def _format_percentage(value: float) -> str:
+    return f"{value * 100:.2f}%"
+
+
+def generate_html_report(
+    report_dir: Path,
+    summary: Dict[str, float],
+    equity_df: pd.DataFrame,
+    trades_df: pd.DataFrame,
+    config: Dict,
+) -> Path:
+    report_dir.mkdir(parents=True, exist_ok=True)
+
+    equity_fig = go.Figure()
+    equity_fig.add_trace(
+        go.Scatter(
+            x=equity_df.index,
+            y=equity_df.iloc[:, 0],
+            mode="lines",
+            name="Equity",
+            line=dict(color="#2563eb", width=2),
+        )
+    )
+    equity_fig.update_layout(
+        title="Portfolio Equity Curve",
+        xaxis_title="Date",
+        yaxis_title="Equity",
+        template="plotly_white",
+        hovermode="x unified",
+    )
+    equity_div = plotly_plot(equity_fig, include_plotlyjs=True, output_type="div")
+
+    summary_df = pd.DataFrame(summary, index=["value"]).T
+    display_df = summary_df.copy()
+    for col in display_df.index:
+        if col in {"cagr", "total_return", "max_drawdown", "win_rate"}:
+            display_df.loc[col, "value"] = _format_percentage(float(display_df.loc[col, "value"]))
+        elif col == "sharpe":
+            display_df.loc[col, "value"] = f"{float(display_df.loc[col, 'value']):.2f}"
+    summary_html = display_df.to_html(header=False)
+
+    trades_preview = trades_df.head(15)
+    trades_html = trades_preview.to_html(index=False)
+
+    config_yaml = yaml.safe_dump(config, sort_keys=False)
+    trades_link = (report_dir / "trades.csv").name
+
+    html = f"""
+    <html>
+      <head>
+        <meta charset='UTF-8'>
+        <title>Backtest Report</title>
+        <style>
+          body {{ font-family: Arial, sans-serif; margin: 20px; color: #111827; }}
+          h1, h2 {{ color: #111827; }}
+          table {{ border-collapse: collapse; margin-bottom: 20px; min-width: 300px; }}
+          table, th, td {{ border: 1px solid #e5e7eb; padding: 6px 10px; }}
+          th {{ background: #f3f4f6; text-align: left; }}
+          .section {{ margin-bottom: 30px; }}
+          .muted {{ color: #6b7280; }}
+          .code-block {{ background: #f9fafb; padding: 12px; border: 1px solid #e5e7eb; border-radius: 6px; }}
+          details {{ border: 1px solid #e5e7eb; padding: 10px; border-radius: 6px; background: #f9fafb; }}
+          summary {{ cursor: pointer; font-weight: bold; }}
+        </style>
+      </head>
+      <body>
+        <h1>Backtest Report</h1>
+        <div class="section">
+          <h2>Summary Metrics</h2>
+          {summary_html}
+        </div>
+        <div class="section">
+          <h2>Interactive Equity Curve</h2>
+          {equity_div}
+        </div>
+        <div class="section">
+          <h2>Trades Preview</h2>
+          <p class="muted">Showing first {len(trades_preview)} trades. Full trade log: <a href="{trades_link}">trades.csv</a></p>
+          {trades_html}
+        </div>
+        <div class="section">
+          <details>
+            <summary>Config Used</summary>
+            <pre class="code-block">{config_yaml}</pre>
+          </details>
+        </div>
+      </body>
+    </html>
+    """
+    report_path = report_dir / "report.html"
+    report_path.write_text(html)
+    return report_path
 
 
 def _encode_img(path: Path) -> str:
