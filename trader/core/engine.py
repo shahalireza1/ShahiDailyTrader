@@ -178,8 +178,8 @@ class BacktestEngine:
 
         portfolio_result = portfolio.combine(per_symbol_results)
         positions_df = portfolio_result.positions
-        gross_exposure = portfolio_result.gross_exposure.mean() if not positions_df.empty else 0.0
-        turnover = positions_df.diff().abs().sum(axis=1).mean() if not positions_df.empty else 0.0
+        gross_exposure = portfolio_result.exposure if portfolio_result.exposure is not None else 0.0
+        turnover = portfolio_result.turnover if portfolio_result.turnover is not None else 0.0
 
         benchmark_curve = self._build_benchmark(per_symbol_results)
         spy_benchmark = self._spy_buy_and_hold(per_symbol_results)
@@ -303,8 +303,8 @@ class BacktestEngine:
 
         portfolio_result = portfolio.combine(per_symbol_results)
         positions_df = portfolio_result.positions
-        gross_exposure = portfolio_result.gross_exposure.mean() if not positions_df.empty else 0.0
-        turnover = positions_df.diff().abs().sum(axis=1).mean() if not positions_df.empty else 0.0
+        gross_exposure = portfolio_result.exposure if portfolio_result.exposure is not None else 0.0
+        turnover = portfolio_result.turnover if portfolio_result.turnover is not None else 0.0
 
         benchmark_curve = self._build_benchmark(per_symbol_results)
         spy_benchmark = self._spy_buy_and_hold(per_symbol_results)

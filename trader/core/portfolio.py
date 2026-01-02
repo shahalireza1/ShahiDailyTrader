@@ -22,6 +22,8 @@ class PortfolioResult:
     positions: pd.DataFrame
     gross_exposure: pd.Series
     portfolio_returns: pd.Series
+    turnover: float
+    exposure: float
 
 
 class Portfolio:
@@ -37,6 +39,7 @@ class Portfolio:
         max_gross_exposure: float = 1.0,
         max_position_per_symbol: float = 1.0,
         trade_cooldown_days: int = 0,
+        eps: float = 1e-6,
     ) -> None:
         self.starting_cash = starting_cash
         self.fee_bps = fee_bps
@@ -49,6 +52,7 @@ class Portfolio:
         self.max_position_per_symbol = max_position_per_symbol
         self.trade_cooldown_days = trade_cooldown_days
         self.transaction_rate = (self.fee_bps + self.slippage_bps) / 10_000
+        self.eps = eps
 
     def _compute_positions(
         self, df: pd.DataFrame, returns: pd.Series, per_symbol_fraction: float
@@ -92,8 +96,7 @@ class Portfolio:
         working["position"] = position.clip(-self.max_position_per_symbol, self.max_position_per_symbol)
 
         position_change = working["position"].diff().fillna(working["position"])
-        transaction_cost = abs(position_change) * self.transaction_rate
-        working["strategy_return"] = working["position"] * working["return"] - transaction_cost
+        working["strategy_return"] = working["position"].shift(1).fillna(0) * working["return"]
         return working
 
     def _classify_action(self, prev_weight: float, new_weight: float) -> str:
@@ -111,52 +114,51 @@ class Portfolio:
         per_symbol_results: Dict[str, pd.DataFrame],
         equity_curve: pd.Series,
     ) -> pd.DataFrame:
+        records: List[Dict[str, float | str | pd.Timestamp]] = []
         if positions.empty:
             return pd.DataFrame(
                 columns=[
                     "date",
                     "ticker",
-                    "action",
+                    "delta_weight",
                     "prev_weight",
                     "new_weight",
-                    "price",
-                    "qty_or_notional",
+                    "price_used",
+                    "notional",
                     "fees",
                     "slippage",
                     "pnl",
                 ]
             )
 
-        records: List[Dict[str, float | str | pd.Timestamp]] = []
         prev_positions = positions.shift().fillna(0.0)
         equity_by_day = equity_curve.shift().fillna(self.starting_cash)
         fee_rate = self.fee_bps / 10_000
         slip_rate = self.slippage_bps / 10_000
 
         for ts in positions.index:
+            equity_val = float(equity_by_day.loc[ts]) if ts in equity_by_day.index else self.starting_cash
             for symbol in positions.columns:
                 prev_weight = float(prev_positions.at[ts, symbol])
                 new_weight = float(positions.at[ts, symbol])
-                if abs(new_weight - prev_weight) < 1e-9:
+                delta_weight = new_weight - prev_weight
+                if abs(delta_weight) < self.eps:
                     continue
 
                 price = float(per_symbol_results[symbol].loc[ts, "Close"])
-                equity_val = float(equity_by_day.loc[ts]) if ts in equity_by_day.index else self.starting_cash
-                notional_change = abs(new_weight - prev_weight) * equity_val
-                qty = notional_change / price if price else 0.0
+                notional_change = abs(delta_weight) * equity_val
                 fees = notional_change * fee_rate
                 slippage = notional_change * slip_rate
-                action = self._classify_action(prev_weight, new_weight)
 
                 records.append(
                     {
                         "date": ts,
                         "ticker": symbol,
-                        "action": action,
+                        "delta_weight": delta_weight,
                         "prev_weight": prev_weight,
                         "new_weight": new_weight,
-                        "price": price,
-                        "qty_or_notional": qty,
+                        "price_used": price,
+                        "notional": notional_change,
                         "fees": fees,
                         "slippage": slippage,
                         "pnl": 0.0,
@@ -166,12 +168,12 @@ class Portfolio:
         return pd.DataFrame.from_records(records)
 
     def combine(self, per_symbol_results: Dict[str, pd.DataFrame]) -> PortfolioResult:
-        returns_df = pd.DataFrame({sym: df["strategy_return"] for sym, df in per_symbol_results.items()})
+        returns_df = pd.DataFrame({sym: df["return"] for sym, df in per_symbol_results.items()})
         returns_df.fillna(0, inplace=True)
         positions_df = pd.DataFrame({sym: df["position"] for sym, df in per_symbol_results.items()})
         positions_df.fillna(0, inplace=True)
 
-        base_portfolio_returns = returns_df.mean(axis=1)
+        base_portfolio_returns = (positions_df.shift().fillna(0) * returns_df).sum(axis=1)
         risk_scaler = dynamic_exposure_scaler(
             base_portfolio_returns,
             drawdown_stop=self.max_drawdown_stop or self.max_drawdown,
@@ -191,27 +193,52 @@ class Portfolio:
         adjusted_results: Dict[str, pd.Series] = {}
         for sym, df in per_symbol_results.items():
             scaled_pos = positions_df[sym].clip(-self.max_position_per_symbol, self.max_position_per_symbol)
-            pos_change = scaled_pos.diff().fillna(scaled_pos)
-            cost = abs(pos_change) * self.transaction_rate
-            adjusted_results[sym] = scaled_pos * df["return"] - cost
+            adjusted_results[sym] = scaled_pos.shift().fillna(0) * df["return"]
             per_symbol_results[sym] = df.assign(position=scaled_pos, strategy_return=adjusted_results[sym])
 
-        portfolio_returns = pd.DataFrame(adjusted_results).mean(axis=1)
-
-        equity_curve = (1 + portfolio_returns).cumprod() * self.starting_cash
         stop_threshold = self.max_drawdown_stop if self.max_drawdown_stop is not None else self.max_drawdown
-        active_mask = apply_drawdown_stop(equity_curve, stop_threshold, self.drawdown_safe_fraction)
-        equity_curve = (1 + portfolio_returns * active_mask).cumprod() * self.starting_cash
+        pre_stop_equity = (1 + base_portfolio_returns).cumprod() * self.starting_cash
+        active_mask = apply_drawdown_stop(pre_stop_equity, stop_threshold, self.drawdown_safe_fraction)
 
         effective_positions = positions_df.mul(active_mask, axis=0)
-        gross_exposure = effective_positions.abs().sum(axis=1)
+        gross_exposure_series = effective_positions.abs().sum(axis=1)
+
+        equity_values: List[float] = []
+        equity = float(self.starting_cash)
+        prev_weights = pd.Series(0.0, index=effective_positions.columns)
+        transaction_rate = self.transaction_rate
+        for idx in effective_positions.index:
+            current_weights = effective_positions.loc[idx]
+            asset_returns = returns_df.loc[idx]
+            weighted_return = float((prev_weights * asset_returns).sum())
+            delta_w = current_weights - prev_weights
+            cost = 0.0
+            if abs(delta_w).sum() > self.eps:
+                cost = equity * transaction_rate * abs(delta_w).sum()
+            equity = equity * (1 + weighted_return) - cost
+            equity_values.append(equity)
+            prev_weights = current_weights
+
+        equity_curve = pd.Series(equity_values, index=effective_positions.index)
+        portfolio_returns = equity_curve.pct_change().fillna(0)
 
         trades_df = self._build_trade_log(effective_positions, per_symbol_results, equity_curve)
+
+        if trades_df.empty and (effective_positions.abs() > self.eps).any().any():
+            raise ValueError("TRADE_LOG_BROKEN: positions changed but no trades were recorded")
+
+        gross_exposure = float(gross_exposure_series.mean()) if not gross_exposure_series.empty else 0.0
+        delta_w = effective_positions.diff().fillna(effective_positions)
+        turnover = 0.0 if trades_df.empty else float(delta_w.abs().sum().sum() / 2)
+        per_symbol_portfolio = effective_positions.shift().fillna(0).mul(returns_df)
+
         return PortfolioResult(
             equity_curve=equity_curve,
             trades=trades_df,
-            per_symbol={sym: df["strategy_return"] for sym, df in per_symbol_results.items()},
+            per_symbol={sym: series for sym, series in per_symbol_portfolio.items()},
             positions=effective_positions,
-            gross_exposure=gross_exposure,
-            portfolio_returns=portfolio_returns * active_mask,
+            gross_exposure=gross_exposure_series,
+            portfolio_returns=portfolio_returns,
+            turnover=turnover,
+            exposure=gross_exposure,
         )

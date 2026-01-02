@@ -62,6 +62,26 @@ def test_flat_equity_when_no_trades_and_no_positions():
 
     assert result.trades.empty
     assert result.equity_curve.diff().abs().max() == 0
+    assert metrics["total_return"] == 0
     assert summary["return_source"] in {"positions_only", "benchmark_only"}
     if summary["return_source"] == "positions_only":
         assert summary["equity_change_days"] == 0
+
+
+def test_trade_log_created_from_weight_deltas():
+    dates = pd.date_range("2024-01-01", periods=2, freq="D")
+    df = pd.DataFrame(
+        {
+            "Close": [100, 101],
+            "return": [0.0, 0.01],
+            "position": [0.0, 0.5],
+        },
+        index=dates,
+    )
+    portfolio = _make_portfolio()
+    per_symbol_results = {"AAA": df}
+
+    result = portfolio.combine(per_symbol_results)
+
+    assert not result.trades.empty
+    assert (result.trades["delta_weight"].abs() > portfolio.eps).any()
