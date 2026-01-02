@@ -227,6 +227,24 @@ class Portfolio:
         if trades_df.empty and (effective_positions.abs() > self.eps).any().any():
             raise ValueError("TRADE_LOG_BROKEN: positions changed but no trades were recorded")
 
+        if trades_df.empty:
+            # Ensure that runs with no executed trades remain flat and report zero returns
+            equity_curve = pd.Series(self.starting_cash, index=returns_df.index)
+            portfolio_returns = pd.Series(0.0, index=returns_df.index)
+            gross_exposure_series = pd.Series(0.0, index=returns_df.index)
+            turnover = 0.0
+            per_symbol_portfolio = returns_df.mul(0.0)
+            return PortfolioResult(
+                equity_curve=equity_curve,
+                trades=trades_df,
+                per_symbol={sym: series for sym, series in per_symbol_portfolio.items()},
+                positions=effective_positions,
+                gross_exposure=gross_exposure_series,
+                portfolio_returns=portfolio_returns,
+                turnover=turnover,
+                exposure=0.0,
+            )
+
         gross_exposure = float(gross_exposure_series.mean()) if not gross_exposure_series.empty else 0.0
         delta_w = effective_positions.diff().fillna(effective_positions)
         turnover = 0.0 if trades_df.empty else float(delta_w.abs().sum().sum() / 2)
