@@ -42,6 +42,16 @@ def compute_metrics(
     expectancy = 0.0
     profit_factor = 0.0
     num_trades = len(trades)
+
+    if num_trades == 0 and equity_curve.diff().abs().gt(1e-9).any():
+        # Guard against spurious performance when no trades were executed
+        daily_returns = pd.Series(dtype=float)
+        total_return = 0.0
+        cagr = 0.0
+        sharpe = 0.0
+        sortino = 0.0
+        max_dd = 0.0
+
     if num_trades:
         wins = trades[trades["pnl"] > 0]
         losses = trades[trades["pnl"] <= 0]
