@@ -6,8 +6,6 @@ from pathlib import Path
 from typing import Dict
 
 import pandas as pd
-import plotly.graph_objs as go
-from plotly.offline import plot as plotly_plot
 import yaml
 
 from trader.analytics.metrics import compute_metrics
@@ -54,6 +52,9 @@ def generate_html_report(
     trades_df: pd.DataFrame,
     config: Dict,
 ) -> Path:
+    import plotly.graph_objs as go
+    from plotly.offline import plot as plotly_plot
+
     report_dir.mkdir(parents=True, exist_ok=True)
 
     equity_fig = go.Figure()

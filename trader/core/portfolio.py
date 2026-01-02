@@ -15,16 +15,6 @@ from trader.core.risk import (
 
 
 @dataclass
-class Trade:
-    symbol: str
-    entry_date: pd.Timestamp
-    exit_date: pd.Timestamp
-    entry_price: float
-    exit_price: float
-    pnl: float
-
-
-@dataclass
 class PortfolioResult:
     equity_curve: pd.Series
     trades: pd.DataFrame
@@ -59,49 +49,6 @@ class Portfolio:
         self.max_position_per_symbol = max_position_per_symbol
         self.trade_cooldown_days = trade_cooldown_days
         self.transaction_rate = (self.fee_bps + self.slippage_bps) / 10_000
-
-    def _generate_trades(self, df: pd.DataFrame, symbol: str) -> List[Trade]:
-        trades: List[Trade] = []
-        prev_signal = 0
-        entry_price: Optional[float] = None
-        entry_date: Optional[pd.Timestamp] = None
-        for ts, row in df.iterrows():
-            signal = int(round(row["position"]))
-            price = float(row["Close"])
-            if prev_signal == 0 and signal > 0:
-                entry_price = price
-                entry_date = ts
-            elif prev_signal > 0 and signal == 0 and entry_price is not None:
-                pnl = (price - entry_price) / entry_price
-                trades.append(
-                    Trade(
-                        symbol=symbol,
-                        entry_date=entry_date or ts,
-                        exit_date=ts,
-                        entry_price=entry_price,
-                        exit_price=price,
-                        pnl=pnl,
-                    )
-                )
-                entry_price = None
-                entry_date = None
-            prev_signal = signal
-
-        if prev_signal > 0 and entry_price is not None:
-            last_price = float(df["Close"].iloc[-1])
-            last_ts = df.index[-1]
-            pnl = (last_price - entry_price) / entry_price
-            trades.append(
-                Trade(
-                    symbol=symbol,
-                    entry_date=entry_date or last_ts,
-                    exit_date=last_ts,
-                    entry_price=entry_price,
-                    exit_price=last_price,
-                    pnl=pnl,
-                )
-            )
-        return trades
 
     def _compute_positions(
         self, df: pd.DataFrame, returns: pd.Series, per_symbol_fraction: float
@@ -149,6 +96,75 @@ class Portfolio:
         working["strategy_return"] = working["position"] * working["return"] - transaction_cost
         return working
 
+    def _classify_action(self, prev_weight: float, new_weight: float) -> str:
+        if prev_weight == 0 and new_weight != 0:
+            return "BUY" if new_weight > 0 else "SELL"
+        if new_weight == 0 and prev_weight != 0:
+            return "SELL" if prev_weight > 0 else "BUY"
+        if prev_weight * new_weight > 0:
+            return "ADJUST"
+        return "ADJUST"
+
+    def _build_trade_log(
+        self,
+        positions: pd.DataFrame,
+        per_symbol_results: Dict[str, pd.DataFrame],
+        equity_curve: pd.Series,
+    ) -> pd.DataFrame:
+        if positions.empty:
+            return pd.DataFrame(
+                columns=[
+                    "date",
+                    "ticker",
+                    "action",
+                    "prev_weight",
+                    "new_weight",
+                    "price",
+                    "qty_or_notional",
+                    "fees",
+                    "slippage",
+                    "pnl",
+                ]
+            )
+
+        records: List[Dict[str, float | str | pd.Timestamp]] = []
+        prev_positions = positions.shift().fillna(0.0)
+        equity_by_day = equity_curve.shift().fillna(self.starting_cash)
+        fee_rate = self.fee_bps / 10_000
+        slip_rate = self.slippage_bps / 10_000
+
+        for ts in positions.index:
+            for symbol in positions.columns:
+                prev_weight = float(prev_positions.at[ts, symbol])
+                new_weight = float(positions.at[ts, symbol])
+                if abs(new_weight - prev_weight) < 1e-9:
+                    continue
+
+                price = float(per_symbol_results[symbol].loc[ts, "Close"])
+                equity_val = float(equity_by_day.loc[ts]) if ts in equity_by_day.index else self.starting_cash
+                notional_change = abs(new_weight - prev_weight) * equity_val
+                qty = notional_change / price if price else 0.0
+                fees = notional_change * fee_rate
+                slippage = notional_change * slip_rate
+                action = self._classify_action(prev_weight, new_weight)
+
+                records.append(
+                    {
+                        "date": ts,
+                        "ticker": symbol,
+                        "action": action,
+                        "prev_weight": prev_weight,
+                        "new_weight": new_weight,
+                        "price": price,
+                        "qty_or_notional": qty,
+                        "fees": fees,
+                        "slippage": slippage,
+                        "pnl": 0.0,
+                    }
+                )
+
+        return pd.DataFrame.from_records(records)
+
     def combine(self, per_symbol_results: Dict[str, pd.DataFrame]) -> PortfolioResult:
         returns_df = pd.DataFrame({sym: df["strategy_return"] for sym, df in per_symbol_results.items()})
         returns_df.fillna(0, inplace=True)
@@ -190,12 +206,7 @@ class Portfolio:
         effective_positions = positions_df.mul(active_mask, axis=0)
         gross_exposure = effective_positions.abs().sum(axis=1)
 
-        all_trades: List[Trade] = []
-        for symbol, df in per_symbol_results.items():
-            trades = self._generate_trades(df.assign(position=df["position"] * active_mask), symbol)
-            all_trades.extend(trades)
-
-        trades_df = pd.DataFrame([t.__dict__ for t in all_trades])
+        trades_df = self._build_trade_log(effective_positions, per_symbol_results, equity_curve)
         return PortfolioResult(
             equity_curve=equity_curve,
             trades=trades_df,
