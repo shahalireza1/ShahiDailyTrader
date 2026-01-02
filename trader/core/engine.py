@@ -72,28 +72,79 @@ class BacktestEngine:
         return registry.create(self.config.strategy.name, **self.config.strategy.parameters)
 
     def _create_backtest_report(
-        self, output_dir: Path, equity_curve: pd.Series, trades: pd.DataFrame, metrics: Dict[str, float]
+        self, output_dir: Path, equity_curve: pd.Series, trades: pd.DataFrame, summary: Dict[str, float]
     ) -> Path:
         equity_df = equity_curve.rename("equity").to_frame()
         trades_df = trades.copy()
-        summary = {
-            "cagr": float(metrics.get("cagr", 0.0)),
-            "total_return": float(metrics.get("total_return", 0.0)),
-            "max_drawdown": float(metrics.get("max_drawdown", 0.0)),
-            "sharpe": float(metrics.get("sharpe", 0.0)),
-            "num_trades": int(metrics.get("num_trades", 0)),
-            "win_rate": float(metrics.get("win_rate", 0.0)),
-        }
 
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "equity.csv").write_text(equity_df.to_csv())
         trades_path = output_dir / "trades.csv"
         trades_df.to_csv(trades_path, index=False)
-        (output_dir / "summary.json").write_text(json.dumps(summary, indent=2))
 
         config_dict = config_to_dict(self.config)
         (output_dir / "config_used.yaml").write_text(yaml.safe_dump(config_dict, sort_keys=False))
         return generate_html_report(output_dir, summary, equity_df, trades_df, config_dict)
+
+    def _build_run_summary(
+        self,
+        metrics: Dict[str, float],
+        equity_curve: pd.Series,
+        trades: pd.DataFrame,
+        positions: pd.DataFrame,
+        benchmark_curve: pd.Series,
+        symbols: Dict[str, pd.DataFrame],
+    ) -> Dict[str, float | int | str | list]:
+        days_with_position = int((positions.abs().sum(axis=1) > 0).sum()) if not positions.empty else 0
+        max_abs_position_weight = float(positions.abs().max().max()) if not positions.empty else 0.0
+        position_diff = positions.diff().abs().sum(axis=1) if not positions.empty else pd.Series(dtype=float)
+        num_position_changes = int(position_diff.gt(1e-9).sum()) if not position_diff.empty else 0
+        equity_change_days = int(equity_curve.diff().abs().gt(1e-9).sum()) if not equity_curve.empty else 0
+        num_trades = int(metrics.get("num_trades", 0))
+
+        flags: list[str] = []
+        if num_position_changes > 0 and num_trades == 0:
+            flags.append("TRADE_LOG_BROKEN")
+        if days_with_position == 0 and equity_change_days > 0:
+            flags.append("EQUITY_NOT_FROM_POSITIONS")
+
+        benchmark_active = not benchmark_curve.empty and bool(benchmark_curve.diff().abs().gt(1e-9).any())
+        if days_with_position == 0 and equity_change_days > 0:
+            return_source = "benchmark_only"
+        elif benchmark_active and days_with_position > 0:
+            return_source = "mixed"
+        else:
+            return_source = "positions_only"
+
+        benchmark_note = ""
+        if benchmark_active:
+            benchmark_symbols = list(symbols.keys())
+            benchmark_focus = "SPY" if "SPY" in benchmark_symbols else (benchmark_symbols[0] if benchmark_symbols else "")
+            benchmark_note = (
+                f"Benchmark comparison uses buy-and-hold of {benchmark_focus or 'available symbols'}; it does not alter equity"
+            )
+
+        summary = {
+            "cagr": float(metrics.get("cagr", 0.0)),
+            "total_return": float(metrics.get("total_return", 0.0)),
+            "max_drawdown": float(metrics.get("max_drawdown", 0.0)),
+            "sharpe": float(metrics.get("sharpe", 0.0)),
+            "num_trades": num_trades,
+            "win_rate": float(metrics.get("win_rate", 0.0)),
+            "days_with_position": days_with_position,
+            "max_abs_position_weight": max_abs_position_weight,
+            "num_position_changes": num_position_changes,
+            "equity_change_days": equity_change_days,
+            "flags": flags,
+            "return_source": return_source,
+        }
+        if benchmark_note:
+            summary["benchmark_details"] = benchmark_note
+        return summary
+
+    def _write_summary(self, output_dir: Path, summary: Dict[str, float | int | str | list]) -> None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "summary.json").write_text(json.dumps(summary, indent=2))
 
     def _run_single_backtest(self) -> EngineResult:
         strategy = self._instantiate_strategy()
@@ -145,6 +196,16 @@ class BacktestEngine:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path(self.config.output_dir) / timestamp
 
+        summary = self._build_run_summary(
+            metrics,
+            portfolio_result.equity_curve,
+            portfolio_result.trades,
+            positions_df,
+            benchmark_curve,
+            per_symbol_results,
+        )
+        self._write_summary(output_dir, summary)
+
         write_reports(
             per_symbol_results,
             portfolio_result.equity_curve,
@@ -155,7 +216,7 @@ class BacktestEngine:
         )
         report_path = None
         if self.generate_html:
-            report_path = self._create_backtest_report(output_dir, portfolio_result.equity_curve, portfolio_result.trades, metrics)
+            report_path = self._create_backtest_report(output_dir, portfolio_result.equity_curve, portfolio_result.trades, summary)
         if not attribution.empty:
             attribution.to_csv(output_dir / "strategy_attribution.csv")
         plots_dir = None
@@ -260,6 +321,16 @@ class BacktestEngine:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path(self.config.output_dir) / f"walkforward_{timestamp}"
 
+        summary = self._build_run_summary(
+            metrics,
+            portfolio_result.equity_curve,
+            portfolio_result.trades,
+            positions_df,
+            benchmark_curve,
+            per_symbol_results,
+        )
+        self._write_summary(output_dir, summary)
+
         write_reports(
             per_symbol_results,
             portfolio_result.equity_curve,
@@ -270,7 +341,7 @@ class BacktestEngine:
         )
         report_path = None
         if self.generate_html:
-            report_path = self._create_backtest_report(output_dir, portfolio_result.equity_curve, portfolio_result.trades, metrics)
+            report_path = self._create_backtest_report(output_dir, portfolio_result.equity_curve, portfolio_result.trades, summary)
         if not attribution.empty:
             attribution.to_csv(output_dir / "strategy_attribution.csv")
         plots_dir = None
