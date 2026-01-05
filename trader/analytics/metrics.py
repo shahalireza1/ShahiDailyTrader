@@ -43,8 +43,9 @@ def compute_metrics(
     profit_factor = 0.0
     num_trades = len(trades)
 
-    if num_trades == 0 and equity_curve.diff().abs().gt(1e-9).any():
-        # Guard against spurious performance when no trades were executed
+    if num_trades == 0:
+        # No trades means no performance; zero out return-related metrics even if
+        # the equity curve changed due to data errors or benchmarks.
         daily_returns = pd.Series(dtype=float)
         total_return = 0.0
         cagr = 0.0
