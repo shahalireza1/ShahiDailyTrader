@@ -28,6 +28,7 @@ class RiskConfig:
     vol_lookback: int = 20
     position_mode: str = "fixed_fraction"
     position_fraction: float = 0.012
+    target_gross_exposure: Optional[float] = None
     kelly_safety: float = 0.5
     trade_cooldown_days: int = 1
     min_active_weight: float = 0.15
@@ -70,8 +71,13 @@ def validate_config(cfg: Config) -> None:
         raise ValueError("Fees and slippage basis points must be non-negative.")
     if cfg.risk.position_fraction <= 0 or cfg.risk.position_fraction > 1.0:
         raise ValueError("position_fraction must be in the interval (0, 1].")
-    if cfg.risk.max_gross_exposure <= 0 or cfg.risk.max_gross_exposure > 0.8:
-        raise ValueError("max_gross_exposure must be in the interval (0, 0.8].")
+    if cfg.risk.max_gross_exposure <= 0 or cfg.risk.max_gross_exposure > 1.0:
+        raise ValueError("max_gross_exposure must be in the interval (0, 1.0].")
+    if cfg.risk.target_gross_exposure is not None:
+        if cfg.risk.target_gross_exposure <= 0 or cfg.risk.target_gross_exposure > 1.0:
+            raise ValueError("target_gross_exposure must be in the interval (0, 1.0].")
+        if cfg.risk.target_gross_exposure > cfg.risk.max_gross_exposure:
+            raise ValueError("target_gross_exposure cannot exceed max_gross_exposure.")
     if cfg.risk.max_drawdown <= 0 or cfg.risk.max_drawdown > 0.12:
         raise ValueError("max_drawdown must be in the interval (0, 0.12].")
     if cfg.risk.max_position_per_symbol <= 0:
@@ -170,6 +176,11 @@ def load_config(path: Path) -> Config:
         vol_lookback=int(risk_data.get("vol_lookback", cfg.risk.vol_lookback)),
         position_mode=str(risk_data.get("position_mode", cfg.risk.position_mode)),
         position_fraction=float(risk_data.get("position_fraction", cfg.risk.position_fraction)),
+        target_gross_exposure=(
+            float(risk_data.get("target_gross_exposure"))
+            if risk_data.get("target_gross_exposure") is not None
+            else cfg.risk.target_gross_exposure
+        ),
         kelly_safety=float(risk_data.get("kelly_safety", cfg.risk.kelly_safety)),
         trade_cooldown_days=int(risk_data.get("trade_cooldown_days", cfg.risk.trade_cooldown_days)),
         min_active_weight=float(risk_data.get("min_active_weight", cfg.risk.min_active_weight)),
