@@ -40,10 +40,11 @@ class Portfolio:
         max_gross_exposure: float = 1.0,
         max_position_per_symbol: float = 1.0,
         trade_cooldown_days: int = 0,
-        min_target_weight: float = 0.1,
-        rebalance_band: float = 0.05,
+        min_target_weight: float = 0.15,
+        rebalance_band: float = 0.1,
         signal_frequency: str = "weekly",
         signal_persistence_days: int = 0,
+        min_hold_days: int = 0,
         eps: float = 1e-6,
     ) -> None:
         self.starting_cash = starting_cash
@@ -61,6 +62,7 @@ class Portfolio:
         self.rebalance_band = max(0.0, rebalance_band)
         self.signal_frequency = signal_frequency
         self.signal_persistence_days = max(0, int(signal_persistence_days))
+        self.min_hold_days = max(0, int(min_hold_days))
         self.eps = eps
 
     def _enforce_min_weight(self, position: pd.Series) -> pd.Series:
@@ -110,6 +112,27 @@ class Portfolio:
                 last_confirmed = pending_value
             confirmed.iloc[idx] = last_confirmed
         return confirmed
+
+    def _apply_min_hold(self, signal: pd.Series) -> pd.Series:
+        if self.min_hold_days <= 1 or signal.empty:
+            return signal
+
+        enforced = signal.copy()
+        last_value = float(enforced.iloc[0])
+        last_change_idx = -self.min_hold_days if abs(last_value) < self.eps else 0
+        enforced.iloc[0] = last_value
+        for i in range(1, len(enforced)):
+            value = float(enforced.iloc[i])
+            if abs(value - last_value) > self.eps:
+                if (i - last_change_idx) < self.min_hold_days:
+                    enforced.iloc[i] = last_value
+                else:
+                    last_value = value
+                    last_change_idx = i
+                    enforced.iloc[i] = last_value
+            else:
+                enforced.iloc[i] = last_value
+        return enforced
 
     def _compute_positions(
         self, executed_signal: pd.Series, returns: pd.Series, per_symbol_fraction: float
@@ -172,6 +195,7 @@ class Portfolio:
             raise ValueError("Signal and weight values must be within [-1, 1]")
 
         filtered_target = self._throttle_signal(target)
+        filtered_target = self._apply_min_hold(filtered_target)
         executed_signal = filtered_target.shift(1).fillna(0)
         fraction = position_sizer(working["return"], self.risk_config) * symbol_weight
         position = self._compute_positions(executed_signal, working["return"], fraction)

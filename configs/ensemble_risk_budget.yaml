@@ -21,8 +21,8 @@ ensemble:
   vol_lookback: 60
   min_weight: 0.15
 risk:
-  max_drawdown: 0.25
-  max_drawdown_stop: 0.15
+  max_drawdown: 0.12
+  max_drawdown_stop: 0.1
   drawdown_safe_fraction: 0.4
   max_gross_exposure: 0.6
   max_position_per_symbol: 0.25
