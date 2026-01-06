@@ -4,8 +4,8 @@ from trader.strategies.standard import SMACrossStrategy, SMARSIStrategy
 
 
 def _mock_data() -> pd.DataFrame:
-    dates = pd.date_range("2020-01-01", periods=10, freq="D")
-    close = pd.Series(range(10), index=dates) + 1
+    dates = pd.date_range("2020-01-01", periods=250, freq="D")
+    close = pd.Series(range(250), index=dates) + 1
     data = pd.DataFrame({
         "Open": close,
         "High": close + 1,

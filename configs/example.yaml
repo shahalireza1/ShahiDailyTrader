@@ -15,7 +15,7 @@ strategy:
     rsi_period: 14
     rsi_threshold: 55
 risk:
-  max_drawdown: 0.25
+  max_drawdown: 0.12
   target_volatility: 0.15
   vol_lookback: 20
   position_mode: fixed_fraction

@@ -102,9 +102,31 @@ class BacktestEngine:
         equity_change_days = int(equity_curve.diff().abs().gt(1e-9).sum()) if not equity_curve.empty else 0
         num_trades = int(metrics.get("num_trades", 0))
         avg_position_size = 0.0
+        avg_gross_exposure = 0.0
+        avg_hold_days = 0.0
         if not positions.empty:
             active_values = positions.abs().where(positions.abs() > 1e-9).stack()
             avg_position_size = float(active_values.mean()) if not active_values.empty else 0.0
+            gross_series = positions.abs().sum(axis=1)
+            avg_gross_exposure = float(gross_series.mean()) if not gross_series.empty else 0.0
+
+            hold_lengths: list[int] = []
+            for col in positions.columns:
+                series = positions[col]
+                current = 0
+                in_position = False
+                for value in series:
+                    if abs(value) > 1e-9:
+                        current += 1
+                        in_position = True
+                    elif in_position:
+                        hold_lengths.append(current)
+                        current = 0
+                        in_position = False
+                if in_position and current > 0:
+                    hold_lengths.append(current)
+            if hold_lengths:
+                avg_hold_days = float(pd.Series(hold_lengths).mean())
 
         trades_per_year = 0.0
         if num_trades > 0 and not equity_curve.empty:
@@ -145,6 +167,8 @@ class BacktestEngine:
             "num_position_changes": num_position_changes,
             "equity_change_days": equity_change_days,
             "avg_position_size": avg_position_size,
+            "avg_gross_exposure": avg_gross_exposure,
+            "avg_hold_days": avg_hold_days,
             "trades_per_year": trades_per_year,
             "flags": flags,
             "return_source": return_source,
@@ -184,6 +208,7 @@ class BacktestEngine:
             rebalance_band=self.config.risk.rebalance_band,
             signal_frequency=self.config.risk.signal_frequency,
             signal_persistence_days=self.config.risk.signal_persistence_days,
+            min_hold_days=self.config.risk.min_hold_days,
         )
         per_symbol_results: Dict[str, pd.DataFrame] = {}
         weight = 1 / max(len(data), 1)
@@ -299,6 +324,7 @@ class BacktestEngine:
             rebalance_band=self.config.risk.rebalance_band,
             signal_frequency=self.config.risk.signal_frequency,
             signal_persistence_days=self.config.risk.signal_persistence_days,
+            min_hold_days=self.config.risk.min_hold_days,
         )
 
         per_symbol_results: Dict[str, pd.DataFrame] = {}

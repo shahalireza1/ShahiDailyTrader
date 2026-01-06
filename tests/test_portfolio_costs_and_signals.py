@@ -1,6 +1,9 @@
 import pandas as pd
 import pytest
 
+import pandas as pd
+import pytest
+
 from trader.analytics.metrics import compute_metrics
 from trader.core.portfolio import Portfolio
 from trader.core.risk import PositionSizingConfig
@@ -32,6 +35,7 @@ def _portfolio(fee_bps: float, slippage_bps: float, risk_cfg: PositionSizingConf
         rebalance_band=0.0,
         signal_frequency="daily",
         signal_persistence_days=0,
+        min_hold_days=0,
     )
 
 
@@ -67,3 +71,38 @@ def test_signals_shift_and_allow_shorts(risk_config: PositionSizingConfig):
 
     assert result.loc[dates[0], "position"] == 0  # shifted by one day
     assert result["position"].min() < 0  # short exposure supported
+
+
+def test_min_hold_days_delay_position_flip(risk_config: PositionSizingConfig):
+    dates = pd.date_range("2024-01-01", periods=6, freq="D")
+    df = pd.DataFrame(
+        {
+            "Close": [100, 101, 102, 103, 104, 105],
+            "signal": [0.0, 1.0, -1.0, -1.0, -1.0, 0.0],
+        },
+        index=dates,
+    )
+
+    portfolio = Portfolio(
+        starting_cash=100_000.0,
+        fee_bps=0.0,
+        slippage_bps=0.0,
+        risk_config=risk_config,
+        max_drawdown=1.0,
+        max_drawdown_stop=None,
+        drawdown_safe_fraction=0.0,
+        max_gross_exposure=1.0,
+        max_position_per_symbol=1.0,
+        trade_cooldown_days=0,
+        rebalance_band=0.0,
+        signal_frequency="daily",
+        signal_persistence_days=0,
+        min_hold_days=3,
+    )
+
+    result = portfolio.backtest_symbol(df, 1.0)
+
+    # Entry happens day 1; despite flip signals, position holds for at least 3 days
+    assert result.loc[dates[2], "position"] > 0
+    assert result.loc[dates[3], "position"] > 0
+    assert result.loc[dates[5], "position"] < 0
