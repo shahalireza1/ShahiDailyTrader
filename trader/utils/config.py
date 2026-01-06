@@ -56,6 +56,24 @@ class Config:
     walkforward: WalkForwardConfig = field(default_factory=WalkForwardConfig)
 
 
+def validate_config(cfg: Config) -> None:
+    if not cfg.symbols:
+        raise ValueError("At least one trading symbol must be provided.")
+    if cfg.starting_cash <= 0:
+        raise ValueError("Starting cash must be positive.")
+    if cfg.fees_bps < 0 or cfg.slippage_bps < 0:
+        raise ValueError("Fees and slippage basis points must be non-negative.")
+    if cfg.risk.position_fraction <= 0 or cfg.risk.position_fraction > 1:
+        raise ValueError("position_fraction must be in the interval (0, 1].")
+    if cfg.risk.max_gross_exposure <= 0:
+        raise ValueError("max_gross_exposure must be positive.")
+    if cfg.risk.max_position_per_symbol <= 0:
+        raise ValueError("max_position_per_symbol must be positive.")
+    allowed_modes = {"backtest", "walkforward", "paper", "report"}
+    if cfg.mode not in allowed_modes:
+        raise ValueError(f"mode must be one of {sorted(allowed_modes)}")
+
+
 def _merge_dict(default: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     merged = default.copy()
     for key, value in override.items():
@@ -147,6 +165,7 @@ def load_config(path: Path) -> Config:
         step=int(walk_data.get("step", cfg.walkforward.step)),
     )
 
+    validate_config(cfg)
     return cfg
 
 

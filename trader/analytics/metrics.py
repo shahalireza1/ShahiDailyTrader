@@ -20,6 +20,7 @@ def compute_metrics(
     starting_cash: float,
     exposure: float | None = None,
     turnover: float | None = None,
+    transaction_costs: pd.Series | None = None,
 ) -> dict:
     daily_returns = equity_curve.pct_change().dropna()
     total_return = (equity_curve.iloc[-1] - starting_cash) / starting_cash if not equity_curve.empty else 0.0
@@ -42,6 +43,12 @@ def compute_metrics(
     expectancy = 0.0
     profit_factor = 0.0
     num_trades = len(trades)
+    total_fees = 0.0
+    total_slippage = 0.0
+    if not trades.empty:
+        total_fees = float(trades.get("fees", pd.Series(dtype=float)).sum())
+        total_slippage = float(trades.get("slippage", pd.Series(dtype=float)).sum())
+    transaction_cost_total = float(transaction_costs.sum()) if transaction_costs is not None else 0.0
 
     if num_trades == 0:
         # No trades means no performance; zero out return-related metrics even if
@@ -82,4 +89,7 @@ def compute_metrics(
         "profit_factor": float(profit_factor),
         "exposure": gross_exposure,
         "turnover": turnover_val,
+        "fees_paid": float(total_fees),
+        "slippage_cost": float(total_slippage),
+        "transaction_costs": transaction_cost_total,
     }

@@ -1,6 +1,9 @@
 import pandas as pd
 
 from trader.analytics.metrics import compute_metrics
+import pandas as pd
+
+from trader.analytics.metrics import compute_metrics
 from trader.core.engine import BacktestEngine
 from trader.core.portfolio import Portfolio
 from trader.core.risk import PositionSizingConfig

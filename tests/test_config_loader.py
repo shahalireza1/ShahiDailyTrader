@@ -1,16 +1,26 @@
 import types
 
+import pytest
+
 from trader.utils import config as config_module
 
 
 def test_load_config_handles_dataclass_defaults(tmp_path):
     config_path = tmp_path / "config.yaml"
-    config_path.write_text("symbols: []\n")
+    config_path.write_text("symbols: ['AAPL']\n")
 
     cfg = config_module.load_config(config_path)
 
     assert cfg.strategy.name == "sma_rsi"
     assert cfg.strategies[0].name == cfg.strategy.name
+
+
+def test_load_config_validates_inputs(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("symbols: []\nfees_bps: -1\n")
+
+    with pytest.raises(ValueError):
+        config_module.load_config(config_path)
 
 
 def test_load_config_accepts_strategy_objects(monkeypatch, tmp_path):
