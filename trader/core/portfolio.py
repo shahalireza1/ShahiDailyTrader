@@ -24,6 +24,7 @@ class PortfolioResult:
     portfolio_returns: pd.Series
     turnover: float
     exposure: float
+    transaction_costs: pd.Series
 
 
 class Portfolio:
@@ -55,9 +56,9 @@ class Portfolio:
         self.eps = eps
 
     def _compute_positions(
-        self, df: pd.DataFrame, returns: pd.Series, per_symbol_fraction: float
+        self, executed_signal: pd.Series, returns: pd.Series, per_symbol_fraction: float
     ) -> pd.Series:
-        base_position = df["signal"].shift(1).fillna(0) * per_symbol_fraction
+        base_position = executed_signal.fillna(0) * per_symbol_fraction
         vol_adj = apply_volatility_target(
             base_position, returns, self.risk_config.target_volatility, self.risk_config.vol_lookback
         )
@@ -90,9 +91,21 @@ class Portfolio:
         working = df.copy()
         working.sort_index(inplace=True)
         working["return"] = working["Close"].pct_change().fillna(0)
+        if "signal" not in working and "weight" not in working:
+            raise ValueError("Input data must include a 'signal' or 'weight' column")
+
+        target = working["weight"] if "weight" in working else working["signal"]
+        target = pd.to_numeric(target, errors="coerce")
+        if target.isna().any():
+            raise ValueError("Signal series contains non-numeric values")
+        if (target.abs() > 1.0).any():
+            raise ValueError("Signal and weight values must be within [-1, 1]")
+
+        executed_signal = target.shift(1).fillna(0)
         fraction = position_sizer(working["return"], self.risk_config) * symbol_weight
-        position = self._compute_positions(working, working["return"], fraction)
+        position = self._compute_positions(executed_signal, working["return"], fraction)
         position = self._apply_trade_cooldown(position)
+        working["executed_signal"] = executed_signal
         working["position"] = position.clip(-self.max_position_per_symbol, self.max_position_per_symbol)
 
         position_change = working["position"].diff().fillna(working["position"])
@@ -204,6 +217,7 @@ class Portfolio:
         gross_exposure_series = effective_positions.abs().sum(axis=1)
 
         equity_values: List[float] = []
+        transaction_costs: List[float] = []
         equity = float(self.starting_cash)
         prev_weights = pd.Series(0.0, index=effective_positions.columns)
         transaction_rate = self.transaction_rate
@@ -217,10 +231,12 @@ class Portfolio:
                 cost = equity * transaction_rate * abs(delta_w).sum()
             equity = equity * (1 + weighted_return) - cost
             equity_values.append(equity)
+            transaction_costs.append(cost)
             prev_weights = current_weights
 
         equity_curve = pd.Series(equity_values, index=effective_positions.index)
         portfolio_returns = equity_curve.pct_change().fillna(0)
+        transaction_cost_series = pd.Series(transaction_costs, index=effective_positions.index)
 
         trades_df = self._build_trade_log(effective_positions, per_symbol_results, equity_curve)
 
@@ -243,6 +259,7 @@ class Portfolio:
                 portfolio_returns=portfolio_returns,
                 turnover=turnover,
                 exposure=0.0,
+                transaction_costs=transaction_cost_series,
             )
 
         gross_exposure = float(gross_exposure_series.mean()) if not gross_exposure_series.empty else 0.0
@@ -259,4 +276,5 @@ class Portfolio:
             portfolio_returns=portfolio_returns,
             turnover=turnover,
             exposure=gross_exposure,
+            transaction_costs=transaction_cost_series,
         )

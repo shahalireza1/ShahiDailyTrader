@@ -190,6 +190,7 @@ class BacktestEngine:
             self.config.starting_cash,
             exposure=gross_exposure,
             turnover=turnover,
+            transaction_costs=portfolio_result.transaction_costs,
         )
         attribution = self._strategy_attribution(per_symbol_results)
         monthly_returns = self._monthly_returns(portfolio_result.equity_curve)
@@ -315,6 +316,7 @@ class BacktestEngine:
             self.config.starting_cash,
             exposure=gross_exposure,
             turnover=turnover,
+            transaction_costs=portfolio_result.transaction_costs,
         )
         attribution = self._strategy_attribution(per_symbol_results)
         monthly_returns = self._monthly_returns(portfolio_result.equity_curve)
