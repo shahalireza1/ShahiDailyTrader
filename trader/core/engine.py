@@ -101,6 +101,15 @@ class BacktestEngine:
         num_position_changes = int(position_diff.gt(1e-9).sum()) if not position_diff.empty else 0
         equity_change_days = int(equity_curve.diff().abs().gt(1e-9).sum()) if not equity_curve.empty else 0
         num_trades = int(metrics.get("num_trades", 0))
+        avg_position_size = 0.0
+        if not positions.empty:
+            active_values = positions.abs().where(positions.abs() > 1e-9).stack()
+            avg_position_size = float(active_values.mean()) if not active_values.empty else 0.0
+
+        trades_per_year = 0.0
+        if num_trades > 0 and not equity_curve.empty:
+            span_days = max((equity_curve.index[-1] - equity_curve.index[0]).days, 1)
+            trades_per_year = num_trades / (span_days / 365.25)
 
         flags: list[str] = []
         if num_position_changes > 0 and num_trades == 0:
@@ -135,6 +144,8 @@ class BacktestEngine:
             "max_abs_position_weight": max_abs_position_weight,
             "num_position_changes": num_position_changes,
             "equity_change_days": equity_change_days,
+            "avg_position_size": avg_position_size,
+            "trades_per_year": trades_per_year,
             "flags": flags,
             "return_source": return_source,
         }
@@ -169,6 +180,10 @@ class BacktestEngine:
             max_gross_exposure=self.config.risk.max_gross_exposure,
             max_position_per_symbol=self.config.risk.max_position_per_symbol,
             trade_cooldown_days=self.config.risk.trade_cooldown_days,
+            min_target_weight=self.config.risk.min_active_weight,
+            rebalance_band=self.config.risk.rebalance_band,
+            signal_frequency=self.config.risk.signal_frequency,
+            signal_persistence_days=self.config.risk.signal_persistence_days,
         )
         per_symbol_results: Dict[str, pd.DataFrame] = {}
         weight = 1 / max(len(data), 1)
@@ -280,6 +295,10 @@ class BacktestEngine:
             max_gross_exposure=self.config.risk.max_gross_exposure,
             max_position_per_symbol=self.config.risk.max_position_per_symbol,
             trade_cooldown_days=self.config.risk.trade_cooldown_days,
+            min_target_weight=self.config.risk.min_active_weight,
+            rebalance_band=self.config.risk.rebalance_band,
+            signal_frequency=self.config.risk.signal_frequency,
+            signal_persistence_days=self.config.risk.signal_persistence_days,
         )
 
         per_symbol_results: Dict[str, pd.DataFrame] = {}

@@ -21,15 +21,19 @@ class RiskConfig:
     max_drawdown: float = 0.2
     max_drawdown_stop: Optional[float] = 0.15
     drawdown_safe_fraction: float = 0.3
-    max_gross_exposure: float = 0.6
+    max_gross_exposure: float = 0.8
     max_position_per_symbol: float = 0.25
     vol_target_annual: Optional[float] = None
     target_volatility: Optional[float] = None
     vol_lookback: int = 20
     position_mode: str = "fixed_fraction"
-    position_fraction: float = 1.0
+    position_fraction: float = 0.012
     kelly_safety: float = 0.5
     trade_cooldown_days: int = 1
+    min_active_weight: float = 0.1
+    rebalance_band: float = 0.05
+    signal_frequency: str = "weekly"
+    signal_persistence_days: int = 3
 
 
 @dataclass
@@ -63,12 +67,20 @@ def validate_config(cfg: Config) -> None:
         raise ValueError("Starting cash must be positive.")
     if cfg.fees_bps < 0 or cfg.slippage_bps < 0:
         raise ValueError("Fees and slippage basis points must be non-negative.")
-    if cfg.risk.position_fraction <= 0 or cfg.risk.position_fraction > 1:
-        raise ValueError("position_fraction must be in the interval (0, 1].")
-    if cfg.risk.max_gross_exposure <= 0:
-        raise ValueError("max_gross_exposure must be positive.")
+    if cfg.risk.position_fraction <= 0 or cfg.risk.position_fraction > 0.015:
+        raise ValueError("position_fraction must be in the interval (0, 0.015].")
+    if cfg.risk.max_gross_exposure <= 0 or cfg.risk.max_gross_exposure > 0.8:
+        raise ValueError("max_gross_exposure must be in the interval (0, 0.8].")
     if cfg.risk.max_position_per_symbol <= 0:
         raise ValueError("max_position_per_symbol must be positive.")
+    if not 0.1 <= cfg.risk.min_active_weight <= 0.2:
+        raise ValueError("min_active_weight must be between 0.1 and 0.2.")
+    if cfg.risk.rebalance_band < 0 or cfg.risk.rebalance_band >= 1:
+        raise ValueError("rebalance_band must be in [0, 1).")
+    if cfg.risk.signal_frequency not in {"daily", "weekly", ""}:
+        raise ValueError("signal_frequency must be one of '', 'daily', or 'weekly'.")
+    if cfg.risk.signal_persistence_days < 0:
+        raise ValueError("signal_persistence_days must be non-negative.")
     allowed_modes = {"backtest", "walkforward", "paper", "report"}
     if cfg.mode not in allowed_modes:
         raise ValueError(f"mode must be one of {sorted(allowed_modes)}")
@@ -155,6 +167,10 @@ def load_config(path: Path) -> Config:
         position_fraction=float(risk_data.get("position_fraction", cfg.risk.position_fraction)),
         kelly_safety=float(risk_data.get("kelly_safety", cfg.risk.kelly_safety)),
         trade_cooldown_days=int(risk_data.get("trade_cooldown_days", cfg.risk.trade_cooldown_days)),
+        min_active_weight=float(risk_data.get("min_active_weight", cfg.risk.min_active_weight)),
+        rebalance_band=float(risk_data.get("rebalance_band", cfg.risk.rebalance_band)),
+        signal_frequency=str(risk_data.get("signal_frequency", cfg.risk.signal_frequency)),
+        signal_persistence_days=int(risk_data.get("signal_persistence_days", cfg.risk.signal_persistence_days)),
     )
 
     cfg.ensemble = dict(ensemble_data)

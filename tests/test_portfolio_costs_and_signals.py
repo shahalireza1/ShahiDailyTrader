@@ -29,6 +29,9 @@ def _portfolio(fee_bps: float, slippage_bps: float, risk_cfg: PositionSizingConf
         max_gross_exposure=1.0,
         max_position_per_symbol=1.0,
         trade_cooldown_days=0,
+        rebalance_band=0.0,
+        signal_frequency="daily",
+        signal_persistence_days=0,
     )
 
 

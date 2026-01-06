@@ -40,6 +40,10 @@ class Portfolio:
         max_gross_exposure: float = 1.0,
         max_position_per_symbol: float = 1.0,
         trade_cooldown_days: int = 0,
+        min_target_weight: float = 0.1,
+        rebalance_band: float = 0.05,
+        signal_frequency: str = "weekly",
+        signal_persistence_days: int = 0,
         eps: float = 1e-6,
     ) -> None:
         self.starting_cash = starting_cash
@@ -53,12 +57,65 @@ class Portfolio:
         self.max_position_per_symbol = max_position_per_symbol
         self.trade_cooldown_days = trade_cooldown_days
         self.transaction_rate = (self.fee_bps + self.slippage_bps) / 10_000
+        self.min_target_weight = min_target_weight
+        self.rebalance_band = max(0.0, rebalance_band)
+        self.signal_frequency = signal_frequency
+        self.signal_persistence_days = max(0, int(signal_persistence_days))
         self.eps = eps
+
+    def _enforce_min_weight(self, position: pd.Series) -> pd.Series:
+        if self.min_target_weight <= 0:
+            return position
+        adjusted = position.copy()
+        active_mask = adjusted.abs() > self.eps
+        adjusted.loc[active_mask] = adjusted.loc[active_mask].apply(
+            lambda x: float("nan")
+            if pd.isna(x)
+            else (1 if x > 0 else -1) * max(abs(x), self.min_target_weight)
+        )
+        return adjusted
+
+    def _throttle_signal(self, signal: pd.Series) -> pd.Series:
+        throttled = signal.copy()
+        if self.signal_frequency.lower() == "weekly":
+            weekly = throttled.resample("W-FRI").last()
+            throttled = weekly.reindex(throttled.index).ffill().bfill().fillna(0)
+        elif self.signal_frequency.lower() not in {"daily", ""}:
+            raise ValueError(f"Unsupported signal_frequency: {self.signal_frequency}")
+
+        if self.signal_persistence_days <= 1:
+            return throttled
+
+        confirmed = throttled.copy()
+        if confirmed.empty:
+            return confirmed
+
+        last_confirmed = float(confirmed.iloc[0])
+        pending_value = last_confirmed
+        streak = 1
+        confirmed.iloc[0] = last_confirmed
+        for idx in range(1, len(confirmed)):
+            val = float(confirmed.iloc[idx])
+            if abs(val - last_confirmed) < self.eps:
+                pending_value = val
+                streak = 1
+                confirmed.iloc[idx] = last_confirmed
+                continue
+            if abs(val - pending_value) < self.eps:
+                streak += 1
+            else:
+                pending_value = val
+                streak = 1
+            if streak >= self.signal_persistence_days:
+                last_confirmed = pending_value
+            confirmed.iloc[idx] = last_confirmed
+        return confirmed
 
     def _compute_positions(
         self, executed_signal: pd.Series, returns: pd.Series, per_symbol_fraction: float
     ) -> pd.Series:
         base_position = executed_signal.fillna(0) * per_symbol_fraction
+        base_position = self._enforce_min_weight(base_position)
         vol_adj = apply_volatility_target(
             base_position, returns, self.risk_config.target_volatility, self.risk_config.vol_lookback
         )
@@ -87,6 +144,19 @@ class Portfolio:
                     last_position = value
         return cooled
 
+    def _apply_rebalance_band(self, positions: pd.DataFrame) -> pd.DataFrame:
+        if self.rebalance_band <= 0 or positions.empty:
+            return positions
+        adjusted = positions.copy()
+        prev = pd.Series(0.0, index=positions.columns)
+        for idx, row in positions.iterrows():
+            delta = row - prev
+            small_move = delta.abs() < self.rebalance_band
+            row.loc[small_move] = prev.loc[small_move]
+            adjusted.loc[idx] = row
+            prev = row
+        return adjusted
+
     def backtest_symbol(self, df: pd.DataFrame, symbol_weight: float) -> pd.DataFrame:
         working = df.copy()
         working.sort_index(inplace=True)
@@ -101,7 +171,8 @@ class Portfolio:
         if (target.abs() > 1.0).any():
             raise ValueError("Signal and weight values must be within [-1, 1]")
 
-        executed_signal = target.shift(1).fillna(0)
+        filtered_target = self._throttle_signal(target)
+        executed_signal = filtered_target.shift(1).fillna(0)
         fraction = position_sizer(working["return"], self.risk_config) * symbol_weight
         position = self._compute_positions(executed_signal, working["return"], fraction)
         position = self._apply_trade_cooldown(position)
@@ -214,6 +285,7 @@ class Portfolio:
         active_mask = apply_drawdown_stop(pre_stop_equity, stop_threshold, self.drawdown_safe_fraction)
 
         effective_positions = positions_df.mul(active_mask, axis=0)
+        effective_positions = self._apply_rebalance_band(effective_positions)
         gross_exposure_series = effective_positions.abs().sum(axis=1)
 
         equity_values: List[float] = []
