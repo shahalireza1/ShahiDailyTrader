@@ -3,7 +3,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -24,6 +24,7 @@ from trader.analytics.plots import (
     plot_strategy_contribution,
 )
 from trader.analytics.reports import generate_html_report, write_reports
+from trader.core.diagnostics import PipelineDiagnostics
 from trader.core.portfolio import Portfolio
 from trader.core.risk import PositionSizingConfig
 from trader.data.loaders import DataLoader, DataRequest
@@ -47,6 +48,7 @@ class EngineResult:
     spy_benchmark: Optional[pd.Series] = None
     rolling_sharpe: Optional[pd.Series] = None
     report_path: Optional[Path] = None
+    summary: Optional[Dict[str, Any]] = None
 
 
 class BacktestEngine:
@@ -94,7 +96,10 @@ class BacktestEngine:
         positions: pd.DataFrame,
         benchmark_curve: pd.Series,
         symbols: Dict[str, pd.DataFrame],
-    ) -> Dict[str, float | int | str | list]:
+        gross_exposure: pd.Series | float | int | None,
+        transaction_costs: pd.Series | None,
+        diagnostics: PipelineDiagnostics | None,
+    ) -> Dict[str, float | int | str | list | dict]:
         days_with_position = int((positions.abs().sum(axis=1) > 0).sum()) if not positions.empty else 0
         max_abs_position_weight = float(positions.abs().max().max()) if not positions.empty else 0.0
         position_diff = positions.diff().abs().sum(axis=1) if not positions.empty else pd.Series(dtype=float)
@@ -155,6 +160,66 @@ class BacktestEngine:
                 f"Benchmark comparison uses buy-and-hold of {benchmark_focus or 'available symbols'}; it does not alter equity"
             )
 
+        # Diagnostics block
+        gross_series = gross_exposure if isinstance(gross_exposure, pd.Series) else None
+        if gross_series is None:
+            gross_series = positions.abs().sum(axis=1) if not positions.empty else pd.Series(dtype=float)
+        pct_days_in_cash = float((gross_series < 0.01).mean()) if not gross_series.empty else 0.0
+        pct_days_in_market = float((gross_series >= 0.30).mean()) if not gross_series.empty else 0.0
+        median_gross = float(gross_series.median()) if not gross_series.empty else 0.0
+        p90_gross = float(gross_series.quantile(0.9)) if not gross_series.empty else 0.0
+
+        per_symbol_signal: Dict[str, Dict[str, float]] = {}
+        per_symbol_weights: Dict[str, float] = {}
+        overall_signals: list[pd.Series] = []
+        overall_weights: list[pd.Series] = []
+        for sym, frame in symbols.items():
+            signal_series = frame.get("signal", frame.get("raw_signal", pd.Series(dtype=float))).fillna(0)
+            per_symbol_signal[sym] = {
+                "avg_abs_signal": float(signal_series.abs().mean()) if not signal_series.empty else 0.0,
+                "pct_nonzero_signal_days": float((signal_series.abs() > 1e-9).mean()) if not signal_series.empty else 0.0,
+            }
+            overall_signals.append(signal_series)
+
+            final_positions = frame.get("final_position", frame.get("position", pd.Series(dtype=float))).fillna(0)
+            active_mask = final_positions.abs() > 1e-9
+            avg_active_weight = float(final_positions[active_mask].abs().mean()) if active_mask.any() else 0.0
+            per_symbol_weights[sym] = avg_active_weight
+            overall_weights.append(final_positions.abs())
+
+        combined_signals = pd.concat(overall_signals) if overall_signals else pd.Series(dtype=float)
+        combined_weights = pd.concat(overall_weights) if overall_weights else pd.Series(dtype=float)
+        active_overall_weights = combined_weights[combined_weights > 1e-9] if not combined_weights.empty else pd.Series(dtype=float)
+        overall_weight_active = float(active_overall_weights.mean()) if not active_overall_weights.empty else 0.0
+
+        diagnostics_block = {
+            "pct_days_in_cash": pct_days_in_cash,
+            "pct_days_in_market": pct_days_in_market,
+            "avg_gross_exposure": float(gross_series.mean()) if not gross_series.empty else 0.0,
+            "median_gross_exposure": median_gross,
+            "p90_gross_exposure": p90_gross,
+            "signal_activity": {
+                "overall": {
+                    "avg_abs_signal": float(combined_signals.abs().mean()) if not combined_signals.empty else 0.0,
+                    "pct_nonzero_signal_days": float((combined_signals.abs() > 1e-9).mean())
+                    if not combined_signals.empty
+                    else 0.0,
+                },
+                "per_symbol": per_symbol_signal,
+            },
+            "avg_target_weight_when_active": {
+                "overall": overall_weight_active,
+                "per_symbol": per_symbol_weights,
+            },
+            "block_reasons": diagnostics.export() if diagnostics else {},
+            "transaction_costs_total": float(transaction_costs.sum()) if transaction_costs is not None else 0.0,
+            "transaction_costs_bps_of_equity": (
+                float(transaction_costs.sum()) / self.config.starting_cash * 10_000
+                if transaction_costs is not None and self.config.starting_cash
+                else 0.0
+            ),
+        }
+
         summary = {
             "cagr": float(metrics.get("cagr", 0.0)),
             "total_return": float(metrics.get("total_return", 0.0)),
@@ -172,12 +237,13 @@ class BacktestEngine:
             "trades_per_year": trades_per_year,
             "flags": flags,
             "return_source": return_source,
+            "diagnostics": diagnostics_block,
         }
         if benchmark_note:
             summary["benchmark_details"] = benchmark_note
         return summary
 
-    def _write_summary(self, output_dir: Path, summary: Dict[str, float | int | str | list]) -> None:
+    def _write_summary(self, output_dir: Path, summary: Dict[str, Any]) -> None:
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "summary.json").write_text(json.dumps(summary, indent=2))
 
@@ -193,6 +259,7 @@ class BacktestEngine:
             target_volatility=self.config.risk.target_volatility,
             vol_lookback=self.config.risk.vol_lookback,
         )
+        diagnostics = PipelineDiagnostics()
         portfolio = Portfolio(
             starting_cash=self.config.starting_cash,
             fee_bps=self.config.fees_bps,
@@ -209,6 +276,7 @@ class BacktestEngine:
             signal_frequency=self.config.risk.signal_frequency,
             signal_persistence_days=self.config.risk.signal_persistence_days,
             min_hold_days=self.config.risk.min_hold_days,
+            diagnostics=diagnostics,
         )
         per_symbol_results: Dict[str, pd.DataFrame] = {}
         weight = 1 / max(len(data), 1)
@@ -244,6 +312,9 @@ class BacktestEngine:
             positions_df,
             benchmark_curve,
             per_symbol_results,
+            portfolio_result.gross_exposure,
+            portfolio_result.transaction_costs,
+            diagnostics,
         )
         self._write_summary(output_dir, summary)
 
@@ -295,6 +366,7 @@ class BacktestEngine:
             spy_benchmark=spy_benchmark,
             rolling_sharpe=rolling_sharpe,
             report_path=report_path,
+            summary=summary,
         )
 
     def _run_walkforward(self) -> EngineResult:
@@ -309,6 +381,7 @@ class BacktestEngine:
             target_volatility=self.config.risk.target_volatility,
             vol_lookback=self.config.risk.vol_lookback,
         )
+        diagnostics = PipelineDiagnostics()
         portfolio = Portfolio(
             starting_cash=self.config.starting_cash,
             fee_bps=self.config.fees_bps,
@@ -325,6 +398,7 @@ class BacktestEngine:
             signal_frequency=self.config.risk.signal_frequency,
             signal_persistence_days=self.config.risk.signal_persistence_days,
             min_hold_days=self.config.risk.min_hold_days,
+            diagnostics=diagnostics,
         )
 
         per_symbol_results: Dict[str, pd.DataFrame] = {}
@@ -375,6 +449,9 @@ class BacktestEngine:
             positions_df,
             benchmark_curve,
             per_symbol_results,
+            portfolio_result.gross_exposure,
+            portfolio_result.transaction_costs,
+            diagnostics,
         )
         self._write_summary(output_dir, summary)
 
@@ -426,6 +503,7 @@ class BacktestEngine:
             spy_benchmark=spy_benchmark,
             rolling_sharpe=rolling_sharpe,
             report_path=report_path,
+            summary=summary,
         )
 
     def _build_benchmark(self, per_symbol_results: Dict[str, pd.DataFrame]) -> pd.Series:

@@ -45,6 +45,55 @@ def _format_percentage(value: float) -> str:
     return f"{value * 100:.2f}%"
 
 
+def _diagnostics_section(diagnostics: Dict[str, float | dict] | None) -> str:
+    if not diagnostics:
+        return ""
+
+    exposure_fields = [
+        "pct_days_in_cash",
+        "pct_days_in_market",
+        "avg_gross_exposure",
+        "median_gross_exposure",
+        "p90_gross_exposure",
+        "transaction_costs_total",
+        "transaction_costs_bps_of_equity",
+    ]
+    exposure_data = {k: diagnostics.get(k, 0.0) for k in exposure_fields}
+    exposure_df = pd.DataFrame(exposure_data, index=["value"]).T
+    exposure_html = exposure_df.to_html(float_format=lambda x: f"{x:.4f}")
+
+    block_reasons = diagnostics.get("block_reasons", {}) if isinstance(diagnostics, dict) else {}
+    block_html = ""
+    if block_reasons:
+        block_html = pd.DataFrame(block_reasons, index=["count"]).T.sort_index().to_html()
+
+    signal_activity = diagnostics.get("signal_activity", {}) if isinstance(diagnostics, dict) else {}
+    signal_per_symbol = signal_activity.get("per_symbol", {}) if isinstance(signal_activity, dict) else {}
+    signal_html = ""
+    if signal_per_symbol:
+        signal_html = pd.DataFrame(signal_per_symbol).T.to_html(float_format=lambda x: f"{x:.4f}")
+
+    target_weights = diagnostics.get("avg_target_weight_when_active", {}) if isinstance(diagnostics, dict) else {}
+    target_per_symbol = target_weights.get("per_symbol", {}) if isinstance(target_weights, dict) else {}
+    target_html = ""
+    if target_per_symbol:
+        target_html = pd.DataFrame(target_per_symbol, index=["avg_weight"]).T.to_html(float_format=lambda x: f"{x:.4f}")
+
+    return f"""
+        <div class="section">
+          <h2>Diagnostics</h2>
+          <h4>Exposure & Costs</h4>
+          {exposure_html}
+          <h4>Block Reasons</h4>
+          {block_html or '<p class="muted">No blocks recorded</p>'}
+          <h4>Signal Activity (per symbol)</h4>
+          {signal_html or '<p class="muted">No signals captured</p>'}
+          <h4>Average Target Weight When Active (per symbol)</h4>
+          {target_html or '<p class="muted">No active weights</p>'}
+        </div>
+    """
+
+
 def generate_html_report(
     report_dir: Path,
     summary: Dict[str, float],
@@ -76,7 +125,9 @@ def generate_html_report(
     )
     equity_div = plotly_plot(equity_fig, include_plotlyjs=True, output_type="div")
 
-    summary_df = pd.DataFrame(summary, index=["value"]).T
+    diag_block = summary.get("diagnostics", {}) if isinstance(summary, dict) else {}
+    display_summary = {k: v for k, v in summary.items() if k != "diagnostics"}
+    summary_df = pd.DataFrame(display_summary, index=["value"]).T
     display_df = summary_df.copy()
     for col in display_df.index:
         if col in {"cagr", "total_return", "max_drawdown", "win_rate"}:
@@ -90,6 +141,8 @@ def generate_html_report(
 
     config_yaml = yaml.safe_dump(config, sort_keys=False)
     trades_link = (report_dir / "trades.csv").name
+
+    diagnostics_html = _diagnostics_section(diag_block)
 
     html = f"""
     <html>
@@ -130,6 +183,7 @@ def generate_html_report(
             <pre class="code-block">{config_yaml}</pre>
           </details>
         </div>
+        {diagnostics_html}
       </body>
     </html>
     """
@@ -154,6 +208,7 @@ def build_html_report(
     rolling_sharpe_plot: Path | None = None,
     strategy_contribution_plot: Path | None = None,
     spy_comparison_plot: Path | None = None,
+    diagnostics: Dict[str, float | dict] | None = None,
 ) -> Path:
     metrics_df = pd.DataFrame(metrics, index=["value"]).T
     metrics_html = metrics_df.to_html(float_format=lambda x: f"{x:.4f}")
@@ -188,6 +243,8 @@ def build_html_report(
         else ""
     )
 
+    diagnostics_html = _diagnostics_section(diagnostics)
+
     html = f"""
     <html>
       <head>
@@ -218,6 +275,7 @@ def build_html_report(
         {spy_img}
         {contribution_img}
         {attribution_html}
+        {diagnostics_html}
       </body>
     </html>
     """
