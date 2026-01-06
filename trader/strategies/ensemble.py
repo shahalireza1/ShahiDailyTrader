@@ -89,10 +89,12 @@ class EnsembleStrategy(Strategy):
         signals_df = signals_df.reindex(data.index).fillna(method="ffill").fillna(0)
         weights_df = self._resolve_weights(signals_df)
         combined_signal = self._combine_signals(signals_df)
+        trend_pass: pd.Series | None = None
         if self.params.trend_filter_window:
             close_col = data.get(self.params.trend_filter_column, data["Close"])
             long_trend = close_col.rolling(int(self.params.trend_filter_window)).mean()
-            combined_signal = combined_signal.where(close_col > long_trend, 0.0)
+            trend_pass = close_col > long_trend
+            combined_signal = combined_signal.where(trend_pass, 0.0)
         df = data.copy()
         for col in signals_df.columns:
             df[col] = signals_df[col]
@@ -100,4 +102,5 @@ class EnsembleStrategy(Strategy):
             df[f"weight_{col.split('signal_',1)[-1] if col.startswith('signal_') else col}"] = weights_df[col]
         df["signal"] = combined_signal
         df["combined_weight"] = weights_df.sum(axis=1)
+        df["trend_filter_pass"] = trend_pass if trend_pass is not None else True
         return df

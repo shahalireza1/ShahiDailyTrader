@@ -1,9 +1,7 @@
 import pandas as pd
 
 from trader.analytics.metrics import compute_metrics
-import pandas as pd
-
-from trader.analytics.metrics import compute_metrics
+from trader.core.diagnostics import PipelineDiagnostics
 from trader.core.engine import BacktestEngine
 from trader.core.portfolio import Portfolio
 from trader.core.risk import PositionSizingConfig
@@ -64,6 +62,9 @@ def test_flat_equity_when_no_trades_and_no_positions():
         result.positions,
         pd.Series(dtype=float),
         per_symbol_results,
+        result.gross_exposure,
+        result.transaction_costs,
+        PipelineDiagnostics(),
     )
 
     assert result.trades.empty

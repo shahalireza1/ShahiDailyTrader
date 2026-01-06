@@ -78,6 +78,13 @@ Run a backtest and emit plots:
 python -m trader.cli --config config.yaml --plot
 ```
 
+Generate the diagnostics-heavy report for the new ensemble presets:
+```bash
+python -m trader report --config configs/ensemble_baseline.yaml
+python -m trader report --config configs/ensemble_high_exposure.yaml
+python -m trader report --config configs/ensemble_low_churn.yaml
+```
+
 Run walk-forward or paper modes:
 ```bash
 python -m trader.cli --config config.yaml --run walkforward

@@ -1,0 +1,46 @@
+symbols:
+  - SPY
+  - QQQ
+start: "2022-01-01"
+end: "2023-12-31"
+mode: backtest
+fees_bps: 1.0
+slippage_bps: 1.0
+starting_cash: 100000
+strategies:
+  - name: sma_rsi
+    parameters:
+      fast: 20
+      slow: 50
+      rsi_period: 14
+      rsi_threshold: 55
+  - name: momentum
+    parameters:
+      lookback: 120
+      top_n: 2
+ensemble:
+  mode: equal_weight
+  trend_filter_window: 100
+  trend_filter_column: Close
+risk:
+  max_drawdown: 0.12
+  max_drawdown_stop: 0.1
+  drawdown_safe_fraction: 0.35
+  max_gross_exposure: 0.8
+  max_position_per_symbol: 0.25
+  trade_cooldown_days: 1
+  target_volatility: 0.15
+  vol_lookback: 20
+  position_mode: fixed_fraction
+  position_fraction: 0.012
+  kelly_safety: 0.5
+  min_active_weight: 0.15
+  rebalance_band: 0.1
+  signal_frequency: weekly
+  signal_persistence_days: 5
+  min_hold_days: 10
+walkforward:
+  train_window: 252
+  test_window: 90
+  step: 90
+output_dir: outputs

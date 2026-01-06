@@ -44,6 +44,7 @@ def run_experiments(
             rolling_sharpe_plot=plots_dir / "rolling_sharpe.png",
             strategy_contribution_plot=plots_dir / "strategy_contribution.png",
             spy_comparison_plot=plots_dir / "spy_comparison.png",
+            diagnostics=(result.summary or {}).get("diagnostics") if result.summary else None,
         )
         records.append(
             {

@@ -68,6 +68,7 @@ def run_cli(args: argparse.Namespace) -> None:
             rolling_sharpe_plot=plots_dir / "rolling_sharpe.png",
             strategy_contribution_plot=plots_dir / "strategy_contribution.png",
             spy_comparison_plot=plots_dir / "spy_comparison.png",
+            diagnostics=(result.summary or {}).get("diagnostics") if result.summary else None,
         )
         print("\nReport ready!")
         print(f"Outputs saved to: {result.output_dir.resolve()}")
@@ -99,6 +100,7 @@ def run_cli(args: argparse.Namespace) -> None:
             rolling_sharpe_plot=plots_dir / "rolling_sharpe.png",
             strategy_contribution_plot=plots_dir / "strategy_contribution.png",
             spy_comparison_plot=plots_dir / "spy_comparison.png",
+            diagnostics=(result.summary or {}).get("diagnostics") if result.summary else None,
         )
         print(f"Report: {report_path.resolve()}")
 

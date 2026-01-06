@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 
+from trader.core.diagnostics import PipelineDiagnostics
 from trader.core.risk import (
     PositionSizingConfig,
     apply_drawdown_stop,
-    apply_volatility_target,
     dynamic_exposure_scaler,
     position_sizer,
 )
@@ -46,6 +47,7 @@ class Portfolio:
         signal_persistence_days: int = 0,
         min_hold_days: int = 0,
         eps: float = 1e-6,
+        diagnostics: PipelineDiagnostics | None = None,
     ) -> None:
         self.starting_cash = starting_cash
         self.fee_bps = fee_bps
@@ -64,6 +66,7 @@ class Portfolio:
         self.signal_persistence_days = max(0, int(signal_persistence_days))
         self.min_hold_days = max(0, int(min_hold_days))
         self.eps = eps
+        self.diagnostics = diagnostics or PipelineDiagnostics(eps)
 
     def _enforce_min_weight(self, position: pd.Series) -> pd.Series:
         if self.min_target_weight <= 0:
@@ -136,13 +139,20 @@ class Portfolio:
 
     def _compute_positions(
         self, executed_signal: pd.Series, returns: pd.Series, per_symbol_fraction: float
-    ) -> pd.Series:
+    ) -> Tuple[pd.Series, pd.Series, pd.Series]:
         base_position = executed_signal.fillna(0) * per_symbol_fraction
         base_position = self._enforce_min_weight(base_position)
-        vol_adj = apply_volatility_target(
-            base_position, returns, self.risk_config.target_volatility, self.risk_config.vol_lookback
-        )
-        return vol_adj.clip(-1, 1)
+        warmup_mask = pd.Series(False, index=base_position.index)
+
+        if self.risk_config.target_volatility and self.risk_config.target_volatility > 0:
+            rolling_vol = returns.rolling(self.risk_config.vol_lookback).std() * np.sqrt(252)
+            warmup_mask = rolling_vol.isna() | (rolling_vol <= self.eps)
+            scale = self.risk_config.target_volatility / rolling_vol.replace(0, np.nan)
+            scale = scale.clip(upper=5).fillna(0)
+            vol_adj = (base_position * scale).clip(-1, 1)
+        else:
+            vol_adj = base_position
+        return vol_adj.clip(-1, 1), base_position, warmup_mask
 
     def _apply_trade_cooldown(self, position: pd.Series) -> pd.Series:
         if self.trade_cooldown_days <= 0:
@@ -167,17 +177,25 @@ class Portfolio:
                     last_position = value
         return cooled
 
-    def _apply_rebalance_band(self, positions: pd.DataFrame) -> pd.DataFrame:
+    def _apply_rebalance_band(
+        self, positions: pd.DataFrame, return_mask: bool = False
+    ) -> Tuple[pd.DataFrame, pd.DataFrame] | pd.DataFrame:
         if self.rebalance_band <= 0 or positions.empty:
+            if return_mask:
+                return positions, pd.DataFrame(False, index=positions.index, columns=positions.columns)
             return positions
         adjusted = positions.copy()
         prev = pd.Series(0.0, index=positions.columns)
+        suppressed = pd.DataFrame(False, index=positions.index, columns=positions.columns)
         for idx, row in positions.iterrows():
             delta = row - prev
             small_move = delta.abs() < self.rebalance_band
             row.loc[small_move] = prev.loc[small_move]
+            suppressed.loc[idx] = small_move
             adjusted.loc[idx] = row
             prev = row
+        if return_mask:
+            return adjusted, suppressed
         return adjusted
 
     def backtest_symbol(self, df: pd.DataFrame, symbol_weight: float) -> pd.DataFrame:
@@ -198,10 +216,41 @@ class Portfolio:
         filtered_target = self._apply_min_hold(filtered_target)
         executed_signal = filtered_target.shift(1).fillna(0)
         fraction = position_sizer(working["return"], self.risk_config) * symbol_weight
-        position = self._compute_positions(executed_signal, working["return"], fraction)
+        position, base_position, warmup_mask = self._compute_positions(executed_signal, working["return"], fraction)
         position = self._apply_trade_cooldown(position)
+
+        working["raw_signal"] = target
+        working["filtered_signal"] = filtered_target
         working["executed_signal"] = executed_signal
-        working["position"] = position.clip(-self.max_position_per_symbol, self.max_position_per_symbol)
+        working["target_weight_pre_cap"] = position.clip(-self.max_position_per_symbol, self.max_position_per_symbol)
+        working["base_position"] = base_position
+        working["position"] = working["target_weight_pre_cap"]
+
+        diag = self.diagnostics
+        if diag:
+            # Stage 1: signal filters suppressed activity
+            drop_mask = (target.abs() > self.eps) & (filtered_target.abs() <= self.eps)
+            trend_mask = pd.Series(False, index=drop_mask.index)
+            if "trend_filter_pass" in working.columns:
+                trend_mask = drop_mask & (~working["trend_filter_pass"].fillna(True))
+                diag.record_block("TREND_FILTER_FAIL", trend_mask)
+            persistence_mask = drop_mask & ~trend_mask
+            if persistence_mask.any():
+                if self.signal_persistence_days > 1 or self.min_hold_days > 1:
+                    diag.record_block("PERSISTENCE_FAIL", persistence_mask)
+                else:
+                    diag.record_block("WARMUP_NOT_MET", persistence_mask)
+
+            # Stage 2: risk sizing reduced to zero
+            size_drop_mask = (filtered_target.abs() > self.eps) & (working["target_weight_pre_cap"].abs() <= self.eps)
+            warmup_drop = size_drop_mask & warmup_mask.reindex(size_drop_mask.index, fill_value=False)
+            if warmup_drop.any():
+                diag.record_block("WARMUP_NOT_MET", warmup_drop)
+            remaining = size_drop_mask & ~warmup_drop
+            if fraction <= self.eps:
+                diag.record_block("RISK_SIZED_TO_ZERO", remaining)
+            else:
+                diag.record_block("RISK_SIZED_TO_ZERO", remaining)
 
         position_change = working["position"].diff().fillna(working["position"])
         working["strategy_return"] = working["position"].shift(1).fillna(0) * working["return"]
@@ -280,6 +329,7 @@ class Portfolio:
         returns_df.fillna(0, inplace=True)
         positions_df = pd.DataFrame({sym: df["position"] for sym, df in per_symbol_results.items()})
         positions_df.fillna(0, inplace=True)
+        pre_cap_positions = positions_df.copy()
 
         base_portfolio_returns = (positions_df.shift().fillna(0) * returns_df).sum(axis=1)
         risk_scaler = dynamic_exposure_scaler(
@@ -291,11 +341,13 @@ class Portfolio:
         if not risk_scaler.empty:
             positions_df = positions_df.mul(risk_scaler, axis=0)
 
+        gross_scaling = pd.Series(1.0, index=positions_df.index)
         if self.max_gross_exposure and self.max_gross_exposure < 1.0:
             gross = positions_df.abs().sum(axis=1)
             scaling = gross.copy()
             scaling[gross > 0] = (self.max_gross_exposure / gross).clip(upper=1.0)
             scaling[gross == 0] = 1.0
+            gross_scaling = scaling
             positions_df = positions_df.mul(scaling, axis=0)
 
         adjusted_results: Dict[str, pd.Series] = {}
@@ -309,7 +361,7 @@ class Portfolio:
         active_mask = apply_drawdown_stop(pre_stop_equity, stop_threshold, self.drawdown_safe_fraction)
 
         effective_positions = positions_df.mul(active_mask, axis=0)
-        effective_positions = self._apply_rebalance_band(effective_positions)
+        effective_positions, suppressed_mask = self._apply_rebalance_band(effective_positions, return_mask=True)
         gross_exposure_series = effective_positions.abs().sum(axis=1)
 
         equity_values: List[float] = []
@@ -335,6 +387,21 @@ class Portfolio:
         transaction_cost_series = pd.Series(transaction_costs, index=effective_positions.index)
 
         trades_df = self._build_trade_log(effective_positions, per_symbol_results, equity_curve)
+
+        # Stage 3 diagnostics: caps, drawdown stops, and rebalance bands
+        if self.diagnostics:
+            drop_mask = (pre_cap_positions.abs() > self.eps) & (effective_positions.abs() <= self.eps)
+            if not drop_mask.empty:
+                gross_scaling_df = pd.DataFrame({col: gross_scaling for col in drop_mask.columns})
+                active_mask_df = pd.DataFrame({col: active_mask for col in drop_mask.columns})
+                cap_mask = drop_mask & (gross_scaling_df <= self.eps)
+                drawdown_mask = drop_mask & (active_mask_df <= self.eps)
+                rebalance_mask = drop_mask & suppressed_mask
+                self.diagnostics.record_block("CAP_BLOCKED", cap_mask)
+                self.diagnostics.record_block("CAP_BLOCKED", drawdown_mask & ~cap_mask)
+                self.diagnostics.record_block("REBALANCE_BAND_SKIP", rebalance_mask)
+                remaining = drop_mask & ~(cap_mask | drawdown_mask | rebalance_mask)
+                self.diagnostics.record_block("CAP_BLOCKED", remaining)
 
         if trades_df.empty and (effective_positions.abs() > self.eps).any().any():
             raise ValueError("TRADE_LOG_BROKEN: positions changed but no trades were recorded")
@@ -363,10 +430,20 @@ class Portfolio:
         turnover = 0.0 if trades_df.empty else float(delta_w.abs().sum().sum() / 2)
         per_symbol_portfolio = effective_positions.shift().fillna(0).mul(returns_df)
 
+        enriched_results: Dict[str, pd.Series] = {}
+        for sym, series in per_symbol_portfolio.items():
+            df = per_symbol_results[sym]
+            enriched = df.assign(
+                final_position=effective_positions[sym],
+                target_weight_pre_cap=df.get("target_weight_pre_cap", pre_cap_positions[sym]),
+            )
+            per_symbol_results[sym] = enriched
+            enriched_results[sym] = series
+
         return PortfolioResult(
             equity_curve=equity_curve,
             trades=trades_df,
-            per_symbol={sym: series for sym, series in per_symbol_portfolio.items()},
+            per_symbol=enriched_results,
             positions=effective_positions,
             gross_exposure=gross_exposure_series,
             portfolio_returns=portfolio_returns,
