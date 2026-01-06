@@ -39,6 +39,7 @@ class Portfolio:
         max_drawdown_stop: float | None = None,
         drawdown_safe_fraction: float = 0.0,
         max_gross_exposure: float = 1.0,
+        target_gross_exposure: float | None = None,
         max_position_per_symbol: float = 1.0,
         trade_cooldown_days: int = 0,
         min_target_weight: float = 0.15,
@@ -57,6 +58,7 @@ class Portfolio:
         self.max_drawdown_stop = max_drawdown_stop
         self.drawdown_safe_fraction = drawdown_safe_fraction
         self.max_gross_exposure = max_gross_exposure
+        self.target_gross_exposure = target_gross_exposure
         self.max_position_per_symbol = max_position_per_symbol
         self.trade_cooldown_days = trade_cooldown_days
         self.transaction_rate = (self.fee_bps + self.slippage_bps) / 10_000
@@ -342,6 +344,15 @@ class Portfolio:
             positions_df = positions_df.mul(risk_scaler, axis=0)
 
         gross_scaling = pd.Series(1.0, index=positions_df.index)
+        if self.target_gross_exposure is not None and self.target_gross_exposure > 0:
+            target_level = min(self.target_gross_exposure, self.max_gross_exposure or self.target_gross_exposure)
+            gross = positions_df.abs().sum(axis=1)
+            scale_up = gross.copy()
+            scale_up[gross > 0] = (target_level / gross).clip(lower=1.0)
+            scale_up[gross == 0] = 1.0
+            gross_scaling = gross_scaling * scale_up
+            positions_df = positions_df.mul(scale_up, axis=0)
+
         if self.max_gross_exposure and self.max_gross_exposure < 1.0:
             gross = positions_df.abs().sum(axis=1)
             scaling = gross.copy()
