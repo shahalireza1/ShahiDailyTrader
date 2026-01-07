@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import argparse
 import itertools
+import warnings
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
+from tqdm import tqdm
 
 from trader.analytics.reports import build_html_report
 from trader.core.engine import BacktestEngine, EngineResult
@@ -94,15 +96,29 @@ def optimize(config_path: Path, output_root: Path, top_k: int = 5) -> Path:
     base_config = load_config(config_path)
     output_root.mkdir(parents=True, exist_ok=True)
 
+    warnings.filterwarnings("ignore", module="pandas")
+
     records: List[Dict[str, Any]] = []
     combinations = list(_param_grid())
+    total_runs = len(combinations)
+    best_cagr = float("-inf")
+    best_drawdown = float("-inf")
 
-    for idx, params in enumerate(combinations, start=1):
-        cfg = _update_config(base_config, params)
-        cfg.output_dir = output_root / f"run_{idx:04d}"
-        result = _run_engine(cfg, enable_plots=False, generate_html=False)
-        run_dir = result.output_dir
-        records.append(_record_metrics(params, result, run_dir))
+    with tqdm(total=total_runs, desc="Optimizing", unit="run") as pbar:
+        for idx, params in enumerate(combinations, start=1):
+            cfg = _update_config(base_config, params)
+            cfg.output_dir = output_root / f"run_{idx:04d}"
+            result = _run_engine(cfg, enable_plots=False, generate_html=False)
+            run_dir = result.output_dir
+            record = _record_metrics(params, result, run_dir)
+            records.append(record)
+            cagr = record["cagr"]
+            max_drawdown = record["max_drawdown"]
+            if cagr > best_cagr or (cagr == best_cagr and max_drawdown > best_drawdown):
+                best_cagr = cagr
+                best_drawdown = max_drawdown
+            pbar.set_postfix(best_cagr=best_cagr, best_dd=best_drawdown)
+            pbar.update(1)
 
     results_df = pd.DataFrame(records)
     results_df.sort_values(by=["cagr", "max_drawdown"], ascending=[False, False], inplace=True)
