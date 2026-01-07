@@ -86,7 +86,7 @@ class EnsembleStrategy(Strategy):
             signals = strat.generate_signals(data)
             signal_cols[f"signal_{strat.name}"] = signals["signal"].astype(float)
         signals_df = pd.DataFrame(signal_cols)
-        signals_df = signals_df.reindex(data.index).fillna(method="ffill").fillna(0)
+        signals_df = signals_df.reindex(data.index).ffill().fillna(0)
         weights_df = self._resolve_weights(signals_df)
         combined_signal = self._combine_signals(signals_df)
         trend_pass: pd.Series | None = None
