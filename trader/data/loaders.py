@@ -82,8 +82,21 @@ class DataLoader:
 
         return normalized
 
-    def fetch_many(self, requests: Iterable[DataRequest]) -> Dict[str, pd.DataFrame]:
+    def fetch_many(
+        self,
+        requests: Iterable[DataRequest],
+        preloaded_data: Optional[Dict[str, pd.DataFrame]] = None,
+    ) -> Dict[str, pd.DataFrame]:
         results: Dict[str, pd.DataFrame] = {}
         for req in requests:
-            results[req.symbol] = self.fetch(req)
+            if preloaded_data and req.symbol in preloaded_data:
+                frame = preloaded_data[req.symbol]
+                if not isinstance(frame.index, pd.DatetimeIndex):
+                    frame = frame.copy()
+                    frame.index = pd.to_datetime(frame.index)
+                start = pd.to_datetime(req.start)
+                end = pd.to_datetime(req.end)
+                results[req.symbol] = frame.loc[start:end].copy()
+            else:
+                results[req.symbol] = self.fetch(req)
         return results

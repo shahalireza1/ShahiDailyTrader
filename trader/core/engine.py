@@ -52,11 +52,18 @@ class EngineResult:
 
 
 class BacktestEngine:
-    def __init__(self, config: Config, enable_plots: bool = False, generate_html: bool = False) -> None:
+    def __init__(
+        self,
+        config: Config,
+        enable_plots: bool = False,
+        generate_html: bool = False,
+        preloaded_data: Optional[Dict[str, pd.DataFrame]] = None,
+    ) -> None:
         self.config = config
         self.loader = DataLoader()
         self.enable_plots = enable_plots
         self.generate_html = generate_html
+        self.preloaded_data = preloaded_data
 
     def _instantiate_strategy(self) -> Strategy:
         strategies_payload = [
@@ -250,7 +257,8 @@ class BacktestEngine:
     def _run_single_backtest(self) -> EngineResult:
         strategy = self._instantiate_strategy()
         data = self.loader.fetch_many(
-            DataRequest(symbol=s, start=self.config.start, end=self.config.end) for s in self.config.symbols
+            (DataRequest(symbol=s, start=self.config.start, end=self.config.end) for s in self.config.symbols),
+            preloaded_data=self.preloaded_data,
         )
         risk_cfg = PositionSizingConfig(
             mode=self.config.risk.position_mode,
@@ -373,7 +381,8 @@ class BacktestEngine:
     def _run_walkforward(self) -> EngineResult:
         strategy = self._instantiate_strategy()
         data = self.loader.fetch_many(
-            DataRequest(symbol=s, start=self.config.start, end=self.config.end) for s in self.config.symbols
+            (DataRequest(symbol=s, start=self.config.start, end=self.config.end) for s in self.config.symbols),
+            preloaded_data=self.preloaded_data,
         )
         risk_cfg = PositionSizingConfig(
             mode=self.config.risk.position_mode,
